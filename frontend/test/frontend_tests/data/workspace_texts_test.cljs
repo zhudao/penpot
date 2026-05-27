@@ -7,8 +7,10 @@
 (ns frontend-tests.data.workspace-texts-test
   (:require
    [app.common.geom.rect :as grc]
+   [app.common.math :as mth]
    [app.common.types.shape :as cts]
    [app.main.data.workspace.texts :as dwt]
+   [app.util.strings :as ust]
    [cljs.test :as t :include-macros true]))
 
 ;; ---------------------------------------------------------------------------
@@ -272,3 +274,68 @@
           result (dwt/apply-text-modifier shape {:width 200 :position-data pd})]
       (t/is (some? result))
       (t/is (some? (:selrect result))))))
+
+;; ---------------------------------------------------------------------------
+;; Tests: float-precision fix for line-height / letter-spacing (Issue 8199)
+;;
+;; Root cause: JavaScript floating-point arithmetic can produce values such as
+;; 1.2000000000000002 instead of 1.2.  When these numbers were converted to
+;; strings with plain `str`, the imprecise representation leaked into the
+;; typography data (and therefore into the API response).
+;;
+;; Fix: both the "save as typography" path in texts.cljs and the UI-change
+;; handler in typography.cljs now apply a 2-decimal precision step before
+;; stringifying.  The two conversion mechanisms are:
+;;   texts.cljs     — (str (mth/precision value 2))
+;;   typography.cljs — (ust/format-precision value 2)
+;; ---------------------------------------------------------------------------
+
+;; --- mth/precision path (texts.cljs) ---
+
+(t/deftest typography-line-height-float-imprecision-rounded-by-mth-precision
+  (t/testing "mth/precision rounds 1.2000000000000002 to 1.2"
+    ;; This is the exact value reproduced in the issue report.
+    (t/is (= "1.2" (str (mth/precision 1.2000000000000002 2))))))
+
+(t/deftest typography-letter-spacing-float-imprecision-rounded-by-mth-precision
+  (t/testing "mth/precision rounds letter-spacing float imprecision correctly"
+    (t/is (= "0.1" (str (mth/precision 0.10000000000000001 2))))))
+
+(t/deftest typography-line-height-clean-float-unchanged-by-mth-precision
+  (t/testing "mth/precision leaves a clean value like 1.4 unchanged"
+    (t/is (= "1.4" (str (mth/precision 1.4 2))))))
+
+(t/deftest typography-line-height-integer-like-float-by-mth-precision
+  (t/testing "mth/precision converts a whole-number float like 1.0 to an integer"
+    ;; (mth/precision 1.0 2) => 1  ->  (str 1) => "1"
+    (t/is (= "1" (str (mth/precision 1.0 2))))))
+
+(t/deftest typography-line-height-zero-by-mth-precision
+  (t/testing "mth/precision handles zero correctly"
+    (t/is (= "0" (str (mth/precision 0.0 2))))))
+
+;; --- ust/format-precision path (typography.cljs UI handler) ---
+
+(t/deftest typography-format-precision-removes-float-imprecision
+  (t/testing "format-precision turns 1.2000000000000002 into \"1.2\""
+    (t/is (= "1.2" (ust/format-precision 1.2000000000000002 2)))))
+
+(t/deftest typography-format-precision-letter-spacing-imprecision
+  (t/testing "format-precision rounds letter-spacing float imprecision"
+    (t/is (= "0.1" (ust/format-precision 0.10000000000000001 2)))))
+
+(t/deftest typography-format-precision-clean-value-unchanged
+  (t/testing "format-precision leaves a clean value like 1.4 unchanged"
+    (t/is (= "1.4" (ust/format-precision 1.4 2)))))
+
+(t/deftest typography-format-precision-strips-trailing-zeros
+  (t/testing "format-precision strips trailing decimal zeros (1.0 => \"1\")"
+    (t/is (= "1" (ust/format-precision 1.0 2)))))
+
+(t/deftest typography-format-precision-zero-value
+  (t/testing "format-precision handles zero"
+    (t/is (= "0" (ust/format-precision 0.0 2)))))
+
+(t/deftest typography-format-precision-non-number-falls-back-to-str
+  (t/testing "format-precision falls back to str for non-numeric input"
+    (t/is (= "normal" (ust/format-precision "normal" 2)))))
