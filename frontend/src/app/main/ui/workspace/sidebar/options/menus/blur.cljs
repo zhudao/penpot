@@ -14,27 +14,39 @@
    [app.main.data.workspace.shapes :as dwsh]
    [app.main.features :as features]
    [app.main.store :as st]
-   [app.main.ui.components.numeric-input :refer [numeric-input*]]
-   [app.main.ui.components.select :refer [select]]
    [app.main.ui.components.title-bar :refer [title-bar*]]
    [app.main.ui.ds.buttons.icon-button :refer [icon-button*]]
+   [app.main.ui.ds.controls.numeric-input :refer [numeric-input*]]
+   [app.main.ui.ds.controls.select :refer [select*]]
    [app.main.ui.ds.foundations.assets.icon :as i]
-   [app.main.ui.icons :as deprecated-icon]
    [app.util.i18n :as i18n :refer [tr]]
    [rumext.v2 :as mf]))
 
 (def blur-attrs [:blur])
 
-(defn create-blur []
+(defn create-blur [type]
   (let [id (uuid/next)]
     {:id id
-     :type :layer-blur
+     :type type
      :value 4
      :hidden false}))
 
+(defn find-blurs
+  [effects]
+  {:background-blur (some #(when (= :background-blur (:type %)) %) effects)
+   :layer-blur      (some #(when (= :layer-blur (:type %)) %) effects)})
+
 (mf/defc blur-menu* [{:keys [ids type values]}]
   (let [blur           (:blur values)
+        _ (prn "blur values" values)
+        {:keys [background-blur layer-blur]}
+        (mf/use-memo
+         [blur]
+         #(find-blurs blur))
+        
         has-value?     (not (nil? blur))
+        has-both-blurs? (and background-blur layer-blur)
+
         render-wasm?   (features/use-feature "render-wasm/v1")
         bg-blur?       (and render-wasm?
                             (contains? cf/flags :background-blur))
@@ -58,10 +70,13 @@
 
         handle-add
         (mf/use-fn
-         (mf/deps change! ids)
+         (mf/deps change! ids background-blur layer-blur)
          (fn []
-           (st/emit! (udw/trigger-bounding-box-cloaking ids))
-           (change! #(assoc % :blur (create-blur)))))
+           (let [blur-type (if (some? background-blur)
+                             :layer-blur
+                             :background-blur)]
+             (st/emit! (udw/trigger-bounding-box-cloaking ids))
+             (change! #(assoc % :blur (create-blur blur-type))))))
 
         handle-delete
         (mf/use-fn
@@ -77,7 +92,7 @@
            (st/emit! (udw/trigger-bounding-box-cloaking ids))
            (change! #(cond-> %
                        (not (contains? % :blur))
-                       (assoc :blur (create-blur))
+                       (assoc :blur (create-blur (:type value)))
 
                        :always
                        (assoc-in [:blur :value] value)))))
@@ -98,42 +113,64 @@
 
         type-options
         (mf/with-memo [bg-blur?]
-          (cond-> [{:value "layer-blur" :label (tr "workspace.options.blur-options.layer-blur")}]
+          (cond-> [{:value "layer-blur" :id "layer-blur" :label (tr "workspace.options.blur-options.layer-blur")}]
             bg-blur?
-            (conj {:value "background-blur" :label (tr "workspace.options.blur-options.background-blur")})))]
+            (conj {:value "background-blur" :id "background-blur" :label (tr "workspace.options.blur-options.background-blur")})))]
 
-    [:div {:class (stl/css :element-set)}
+    [:section {:class (stl/css :element-set)
+               :hidden (not open?)
+               :aria-label (tr "workspace.options.blur-effects-options.title")}
      [:div {:class (stl/css :element-title)}
       [:> title-bar* {:collapsable  has-value?
                       :collapsed    (not open?)
                       :on-collapsed toggle-content
-                      :title        (case type
-                                      :multiple (tr "workspace.options.blur-options.title.multiple")
-                                      :group (tr "workspace.options.blur-options.title.group")
-                                      (tr "workspace.options.blur-options.title"))
+                      :aria-expanded open?
+                      :aria-controls "blur-content"
+                      :title        (cond
+                                      ;; TODO: Add translation
+                                      (and (= type :multiple) bg-blur?) (tr "multiple y background blur")
+                                      (and (= type :group) bg-blur?) (tr "group y background blur")
+                                      (= type :multiple) (tr "workspace.options.blur-options.title.multiple")
+                                      (= type :group) (tr "workspace.options.blur-options.title.group")
+                                      bg-blur? (tr "workspace.options.blur-effects-options.title")
+                                      :else (tr "workspace.options.blur-options.title"))
                       :class        (stl/css-case :title-spacing-blur (not has-value?))}
-       (when-not has-value?
-         [:> icon-button* {:variant "ghost"
-                           :aria-label (tr "workspace.options.blur-options.add-blur")
-                           :on-click handle-add
-                           :icon i/add
-                           :data-testid "add-blur"}])]]
+       (when-not has-both-blurs?
+         [:> icon-button*
+          {:variant "ghost"
+           :aria-label (tr "workspace.options.blur-options.add-blur")
+           :on-click handle-add
+           :icon i/add
+           :data-testid "add-blur"}])]]
+
      (when (and open? has-value?)
-       [:div {:class (stl/css :element-set-content)}
+       [:div {:class (stl/css :element-set-content)
+              :hidden (not open?)
+              :id "blur-content"}
         [:div {:class (stl/css-case :first-row true
                                     :hidden hidden?)}
          [:div {:class (stl/css :blur-info)
                 :data-testid "blur-info"}
-          [:button {:class (stl/css-case :show-more true
-                                         :selected more-options?)
-                    :on-click toggle-more-options}
-           deprecated-icon/menu]
+          [:> icon-button* {:class (stl/css-case :show-more true
+                                                 :selected more-options?)
+                            :on-click toggle-more-options
+                            ;;TODO: Add translation
+                            :aria-label (tr "workspace.options.blur-options.toggle-more-options")
+                            :icon i/menu}]
           (if bg-blur?
-            [:& select {:class (stl/css :blur-type-select)
-                        :default-value (d/name (:type blur))
-                        :options type-options
-                        :disabled hidden?
-                        :on-change handle-type-change}]
+            [:> select* {:class (stl/css :blur-type-select)
+                         :default-selected (if (or (nil? (:type blur)) (= :multiple (:type blur)))
+                                             ""
+                                             (d/name (:type blur)))
+                         :options type-options
+                         ;;TODO: review this
+                         :disabled (case hidden?
+                                     :multiple false
+                                     nil false
+                                     true true
+                                     false false)
+                         :on-change handle-type-change}]
+
             [:span {:class (stl/css :label)}
              (tr "workspace.options.blur-options.title")])]
          [:div {:class (stl/css :actions)}
@@ -144,16 +181,14 @@
           [:> icon-button* {:variant "ghost"
                             :aria-label (tr "workspace.options.blur-options.remove-blur")
                             :on-click handle-delete
-                            :icon i/remove}]]]
-        (when more-options?
-          [:div {:class (stl/css :second-row)}
-           [:label {:class (stl/css :label)
-                    :for "blur-input-sidebar"}
-            (tr "inspect.attributes.blur.value")]
-           [:> numeric-input*
-            {:className (stl/css :numeric-input)
-             :placeholder "--"
-             :id "blur-input-sidebar"
-             :min "0"
-             :on-change handle-change
-             :value (:value blur)}]])])]))
+                            :icon i/remove}]]
+         (when more-options?
+           [:div {:class (stl/css :second-row)}
+            [:> numeric-input*
+             {:class (stl/css :numeric-input)
+              :placeholder "--"
+              :min 0
+              :text-icon "value"
+              :on-change handle-change
+              :name "blur-value"
+              :value (:value blur)}]])]])]))

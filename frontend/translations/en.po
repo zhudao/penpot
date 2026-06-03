@@ -7151,6 +7151,10 @@ msgstr "Remove blur"
 msgid "workspace.options.blur-options.title"
 msgstr "Blur"
 
+#: src/app/main/ui/workspace/sidebar/options/menus/blur.cljs
+msgid "workspace.options.blur-effects-options.title"
+msgstr "Blur effects"
+
 #: src/app/main/ui/workspace/sidebar/options/menus/blur.cljs:112
 msgid "workspace.options.blur-options.title.group"
 msgstr "Group blur"

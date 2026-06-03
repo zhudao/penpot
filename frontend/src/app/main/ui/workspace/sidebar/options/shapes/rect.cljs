@@ -29,6 +29,7 @@
         type   (dm/get-prop shape :type)
         ids    (mf/with-memo [id] [id])
         shapes (mf/with-memo [shape] [shape])
+        _ (.log js/console (clj->js shape))
 
         applied-tokens
         (get shape :applied-tokens)
