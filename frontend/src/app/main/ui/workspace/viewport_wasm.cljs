@@ -784,14 +784,17 @@
            :offset-y offset-y
            :show-rulers show-rulers?}])
 
-       (when (and show-rulers? show-grids?)
-         [:> guides/viewport-guides*
-          {:zoom zoom
-           :vbox vbox
-           :guides guides
-           :hover-frame guide-frame
-           :disabled-guides disabled-guides?
-           :modifiers wasm-modifiers}])
+       ;; NOTE: ruler guides are being migrated to the WASM render engine.
+       ;; The SVG-overlay rendering is temporarily disabled while we implement
+       ;; the new path.
+       #_(when (and show-rulers? show-grids?)
+           [:> guides/viewport-guides*
+            {:zoom zoom
+             :vbox vbox
+             :guides guides
+             :hover-frame guide-frame
+             :disabled-guides disabled-guides?
+             :modifiers wasm-modifiers}])
 
        ;; DEBUG LAYOUT DROP-ZONES
        (when (dbg/enabled? :layout-drop-zones)
