@@ -3,8 +3,10 @@ use std::collections::HashMap;
 
 mod shapes_pool;
 mod text_editor;
+mod ui;
 pub use shapes_pool::{ShapesPool, ShapesPoolMutRef, ShapesPoolRef};
 pub use text_editor::*;
+pub use ui::*;
 
 use crate::error::{Error, Result};
 use crate::render::FrameType;
