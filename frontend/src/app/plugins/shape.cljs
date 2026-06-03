@@ -24,6 +24,7 @@
    [app.common.types.grid :as ctg]
    [app.common.types.path :as path]
    [app.common.types.shape :as cts]
+   [app.common.types.shape.background-blur :as ctsbb]
    [app.common.types.shape.blur :as ctsb]
    [app.common.types.shape.export :as ctse]
    [app.common.types.shape.interactions :as ctsi]
@@ -509,6 +510,25 @@
 
                     :else
                     (st/emit! (dwsh/update-shapes [id] #(assoc % :blur value)))))))}
+
+           :background-blur
+           {:this true
+            :get #(-> % u/proxy->shape :background-blur format/format-blur)
+            :set
+            (fn [self value]
+              (if (nil? value)
+                (st/emit! (dwsh/update-shapes [id] #(dissoc % :background-blur)))
+                (let [id (obj/get self "$id")
+                      value (blur-defaults (parser/parse-blur value))]
+                  (cond
+                    (not (sm/validate ctsbb/schema:background-blur value))
+                    (u/not-valid plugin-id :background-blur value)
+
+                    (not (r/check-permission plugin-id "content:write"))
+                    (u/not-valid plugin-id :background-blur "Plugin doesn't have 'content:write' permission")
+
+                    :else
+                    (st/emit! (dwsh/update-shapes [id] #(assoc % :background-blur value)))))))}
 
            :exports
            {:this true

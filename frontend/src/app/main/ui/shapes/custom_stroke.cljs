@@ -480,7 +480,9 @@
 
         stroke-id     (dm/str (dm/fmt "strokes-%-%" prefix shape-id))
 
-        shape-blur    (get shape :blur)
+        ;;TODO: ask about this
+        shape-blur   (or (get shape :background-blur) (get shape :blur))
+
         shape-fills   (get shape :fills)
         shape-shadow  (get shape :shadow)
         shape-strokes (not-empty strokes)
@@ -498,6 +500,8 @@
 
         open-path?    (and ^boolean (cfh/path-shape? shape)
                            ^boolean (path/shape-with-open-path? shape))]
+    
+    ;; TODO: ask, we need to add backgrop-filter here?
     (when-not ^boolean (cfh/frame-shape? shape)
       (when (and (some? shape-blur)
                  (not ^boolean (:hidden shape-blur)))

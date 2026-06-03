@@ -63,6 +63,7 @@
           ;; TODO: parse feColorMatrix to extract color/opacity
           :color {:color "#000000" :opacity 1}}]))))
 
+;; TODO: ask do we need to add background-blur here as well, or is it only for old render?
 (defn apply-svg-filters
   "Derives native blur/shadow from SVG filter definitions when the shape does
   not already have them. The SVG attributes are left untouched so SVG fallback

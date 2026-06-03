@@ -22,7 +22,7 @@
    [app.util.i18n :as i18n :refer [tr]]
    [rumext.v2 :as mf]))
 
-(def blur-attrs [:blur])
+(def blur-attrs [:blur :background-blur])
 
 (defn create-blur [type]
   (let [id (uuid/next)]

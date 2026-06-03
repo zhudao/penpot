@@ -18,6 +18,7 @@
 (defn get-filter-id []
   (dm/str "filter-" (uuid/next)))
 
+;; TODO: ask about this, we need to add background-blur here as well?
 (defn filter-str
   [filter-id shape]
   (when (or (seq (->> (:shadow shape) (remove :hidden)))
@@ -165,7 +166,7 @@
 
   (let [shape'        (update shape :shadow reverse)
         filters       (-> shape' gsb/shape->filters change-filter-in)
-        bounds        (gsb/get-rect-filter-bounds (:selrect shape) filters (or (-> shape :blur :value) 0))
+        bounds        (gsb/get-rect-filter-bounds (:selrect shape) filters (or (-> shape :blur :value) 0) (or (-> shape :background-blur :value) 0))
         padding       (gsb/calculate-padding shape)
         selrect       (:selrect shape)
 

@@ -37,13 +37,13 @@
   (d/concat-vec
    [{:id "BackgroundImageFix" :type :image-fix}]
 
-   ;; Background blur won't work in current SVG specification
-   ;; We can revisit this in the future
-   #_(->> shape :blur (into []) (blur-filters :background-blur))
-
    (->> shape :shadow (apply-filters :style :drop-shadow))
    [{:id "shape" :type :blend-filters}]
    (->> shape :shadow (apply-filters :style :inner-shadow))
+
+   ;; Background blur won't work in current SVG specification
+   ;; We can revisit this in the future
+   #_(->> shape :background-blur list (apply-filters :type :background-blur))
    (->> shape :blur list (apply-filters :type :layer-blur))))
 
 (defn- calculate-filter-bounds
@@ -65,24 +65,26 @@
     (grc/make-rect filter-x filter-y filter-w filter-h)))
 
 (defn get-rect-filter-bounds
-  ([selrect filters blur-value]
-   (get-rect-filter-bounds selrect filters blur-value false))
-  ([selrect filters blur-value ignore-shadow-margin?]
+  ([selrect filters blur-value background-blur-value]
+   (get-rect-filter-bounds selrect filters blur-value background-blur-value false))
+  ([selrect filters blur-value background-blur-value ignore-shadow-margin?]
    (let [bounds-xf  (comp
                      (filter #(and (not ignore-shadow-margin?)
                                    (= :drop-shadow (:type %))))
                      (map (partial calculate-filter-bounds selrect)))
-         delta-blur (* blur-value 2)]
+         delta-blur (* blur-value 2)
+         delta-background-blur (* background-blur-value 2)
+         max-delta-blur (mth/max delta-blur delta-background-blur)]
      (-> (into [selrect] bounds-xf filters)
          (grc/join-rects)
-         (update :x - delta-blur)
-         (update :y - delta-blur)
-         (update :x1 - delta-blur)
-         (update :y1 - delta-blur)
-         (update :x2 + delta-blur)
-         (update :y2 + delta-blur)
-         (update :width + (* delta-blur 2))
-         (update :height + (* delta-blur 2))))))
+         (update :x - max-delta-blur)
+         (update :y - max-delta-blur)
+         (update :x1 - max-delta-blur)
+         (update :y1 - max-delta-blur)
+         (update :x2 + max-delta-blur)
+         (update :y2 + max-delta-blur)
+         (update :width + (* max-delta-blur 2))
+         (update :height + (* max-delta-blur 2))))))
 
 (defn get-shape-filter-bounds
   ([shape]
@@ -92,18 +94,16 @@
                 (not= :svg (dm/get-in shape [:content :tag])))
            ;; If no shadows or blur, we return the selrect as is
            (and (empty? (-> shape :shadow))
-                (or (nil? (:blur shape))
-                    (not= :layer-blur (-> shape :blur :type))
+                ;; TODO: not sure about this.
+                (or (and (nil? (:background-blur shape))(nil? (:blur shape)))
                     (zero? (-> shape :blur :value (or 0))))))
      (dm/get-prop shape :selrect)
      (let [filters    (shape->filters shape)
-           blur-value (case (-> shape :blur :type)
-                        :layer-blur (or (-> shape :blur :value) 0)
-                        :background-blur 0
-                        0)
+           blur-value (or (-> shape :blur :value) 0)
+           background-blur-value (or (-> shape :background-blur :value) 0)
            srect      (-> (dm/get-prop shape :points)
                           (grc/points->rect))]
-       (get-rect-filter-bounds srect filters blur-value ignore-shadow-margin?)))))
+       (get-rect-filter-bounds srect filters blur-value background-blur-value ignore-shadow-margin?)))))
 
 (defn calculate-padding
   ([shape]
@@ -214,12 +214,10 @@
            (not (cfh/frame-shape? shape)) (or (:children-bounds shape)))
 
          filters (shape->filters shape)
-         blur-value (case (-> shape :blur :type)
-                      :layer-blur (or (-> shape :blur :value) 0)
-                      :background-blur 0
-                      0)]
+         blur-value (or (-> shape :blur :value) 0)
+         background-blur-value (or (-> shape :background-blur :value) 0)]
 
-     (get-rect-filter-bounds children-bounds filters blur-value ignore-shadow-margin?))))
+     (get-rect-filter-bounds children-bounds filters blur-value background-blur-value ignore-shadow-margin?))))
 
 (defn get-frame-bounds
   ([shape]

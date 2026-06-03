@@ -15,16 +15,12 @@
    [rumext.v2 :as mf]))
 
 (defn- has-blur? [shape]
-  (:blur shape))
-
-(defn- blur-css-property [shape]
-  (if (= :background-blur (get-in shape [:blur :type]))
-    :backdrop-filter
-    :filter))
+  (or (:blur shape)
+      (:background-blur shape)))
 
 (mf/defc blur-panel
   [{:keys [objects shapes]}]
-  (let [shapes (->> shapes (filter has-blur?))]
+  (let [shapes (->> shapes (filter #(has-blur? %)))]
     (when (seq shapes)
       [:div {:class (stl/css :attributes-block)}
        [:> inspect-title-bar*
@@ -32,18 +28,32 @@
          :class (stl/css :title-wrapper)
          :title-class (stl/css :blur-attr-title)}
         (when (= (count shapes) 1)
-          (let [prop (blur-css-property (first shapes))]
-            [:> copy-button* {:data  (css/get-css-property objects (first shapes) prop)
-                              :class (stl/css :copy-btn-title)}]))]
+          (let [background-blur (:background-blur (first shapes))
+                layer-blur (:blur (first shapes))]
+            (when background-blur
+              [:> copy-button* {:data  (css/get-css-property objects (first shapes) :backdrop-filter)
+                                :class (stl/css :copy-btn-title)}])
+            (when layer-blur
+              [:> copy-button* {:data  (css/get-css-property objects (first shapes) :filter)
+                                :class (stl/css :copy-btn-title)}])))]
 
        [:div {:class (stl/css :attributes-content)}
         (for [shape shapes]
-          (let [prop (blur-css-property shape)]
+          (let [background-blur (:background-blur (first shapes))
+                layer-blur (:blur (first shapes))]
             [:div {:class (stl/css :blur-row)
                    :key (dm/str "block-" (:id shape) "-blur")}
-             [:div {:class (stl/css :global/attr-label)}
-              (if (= prop :backdrop-filter) "Backdrop Filter" "Filter")]
-             [:div {:class (stl/css :global/attr-value)}
-              [:> copy-button* {:data (css/get-css-property objects shape prop)}
-               [:div {:class (stl/css :button-children)}
-                (css/get-css-value objects shape prop)]]]]))]])))
+             (when background-blur
+               [:div {:class (stl/css :global/attr-label)}
+                "Backdrop Filter"]
+               [:div {:class (stl/css :global/attr-value)}
+                [:> copy-button* {:data (css/get-css-property objects shape :backdrop-filter)}
+                 [:div {:class (stl/css :button-children)}
+                  (css/get-css-value objects shape :backdrop-filter)]]])
+             (when layer-blur
+               [:div {:class (stl/css :global/attr-label)}
+                "Filter"]
+               [:div {:class (stl/css :global/attr-value)}
+                [:> copy-button* {:data (css/get-css-property objects shape :filter)}
+                 [:div {:class (stl/css :button-children)}
+                  (css/get-css-value objects shape :filter)]]])]))]])))

@@ -77,6 +77,7 @@
 
         include-metadata? (mf/use-ctx ed/include-metadata-ctx)
 
+        ;; TODO: we need to review this, maybe we need to add background-blur here as well?
         shape-without-blur (dissoc shape :blur)
         shape-without-shadows (assoc shape :shadow [])
 

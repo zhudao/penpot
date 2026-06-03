@@ -51,7 +51,7 @@
    :grid-column
    :grid-row])
 
-
+;; TODO these :blur should change to :blur-effects
 (def type->panel-group
   {:multiple [:fill :stroke :text :shadow :blur :layout-element]
    :frame    [:visibility :geometry :fill :stroke :shadow :blur :layout :layout-element]
@@ -72,7 +72,8 @@
   (seq (:strokes shape)))
 
 (defn- has-blur? [shape]
-  (:blur shape))
+  (or (:blur shape)
+      (:background-blur shape)))
 
 (defn- has-text? [shape]
   (:content shape))

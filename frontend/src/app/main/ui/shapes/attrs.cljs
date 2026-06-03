@@ -183,7 +183,9 @@
   ([props shape position render-id]
    (let [shape-fills  (get shape :fills)
          shape-shadow (get shape :shadow)
-         shape-blur   (get shape :blur)
+
+         ;;TODO: ask about this
+         shape-blur   (or (get shape :background-blur) (get shape :blur))
 
          svg-attrs    (get-svg-props shape render-id)
          svg-styles   (obj/get svg-attrs "style")
@@ -200,6 +202,7 @@
                           ^boolean (some? (some :fill-color-gradient shape-fills))
                           ^boolean (some? (some :fill-image shape-fills)))
 
+         ;; TODO: ask we need to add backdrop-filter here as well?
          props        (if (cfh/frame-shape? shape)
                         props
                         (if (or (some? (->> shape-shadow (remove :hidden) seq))
