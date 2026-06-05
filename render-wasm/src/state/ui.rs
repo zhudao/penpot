@@ -96,8 +96,7 @@ impl UIState {
         self.guides.set(guides);
     }
 
-    #[allow(dead_code)]
-    fn find_guide_at(&self, x: f32, y: f32, zoom: f32, tolerance: f32) -> Option<&Guide> {
+    pub fn find_guide_at(&self, x: f32, y: f32, zoom: f32, tolerance: f32) -> Option<&Guide> {
         self.guides.find_at(x, y, zoom, tolerance)
     }
 }

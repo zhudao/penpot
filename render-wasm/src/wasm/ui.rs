@@ -95,3 +95,12 @@ pub extern "C" fn set_guides() -> Result<()> {
     mem::free_bytes()?;
     Ok(())
 }
+
+#[wasm_error]
+#[no_mangle]
+pub extern "C" fn find_guide_at(x: f32, y: f32, zoom: f32, tolerance: f32) -> Result<i32> {
+    Ok(get_ui_state()
+        .find_guide_at(x, y, zoom, tolerance)
+        .map(|guide| guide.index as i32)
+        .unwrap_or(-1))
+}

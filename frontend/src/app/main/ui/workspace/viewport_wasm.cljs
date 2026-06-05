@@ -797,8 +797,8 @@
          [:> guides/viewport-guides*
           {:zoom zoom
            :vbox vbox
-           ;;             :guides guides
-           :guides #{}
+           :guides guides
+           :wasm-guides? true
            :hover-frame guide-frame
            :disabled-guides disabled-guides?
            :modifiers wasm-modifiers}])
