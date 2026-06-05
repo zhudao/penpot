@@ -26,7 +26,7 @@
    [app.main.ui.inspect.exports :refer [exports]]
    [rumext.v2 :as mf]))
 
-;; TODO these :blur should change to :blur-effects
+;; TODO_BLUR: these :blur should change to :blur-effects
 (def type->options
   {:multiple [:fill :stroke :text :shadow :blur :layout-element]
    :frame    [:visibility :geometry :fill :stroke :shadow :blur :layout :layout-element]

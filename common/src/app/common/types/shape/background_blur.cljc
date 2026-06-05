@@ -11,6 +11,6 @@
 (def schema:background-blur
   [:map {:title "BackgroundBlur"}
    [:id ::sm/uuid]
-   [:type :background-blur]
+   [:type :any] ;;TODO_BLUR: This must be changed
    [:value ::sm/safe-number]
    [:hidden :boolean]])

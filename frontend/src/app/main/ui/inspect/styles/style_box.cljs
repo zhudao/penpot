@@ -23,7 +23,7 @@
     :fill       (tr "labels.fill")
     :stroke     (tr "labels.stroke")
     :text       (tr "labels.text")
-    ;; TODO: Review this title for blur-effects
+    ;; TODO_BLUR: Review this title for blur-effects
     :blur       (tr "labels.blur")
     :shadow     (tr "labels.shadow")
     :layout     (tr "labels.layout")

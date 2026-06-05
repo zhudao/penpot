@@ -18,7 +18,7 @@
 (defn get-filter-id []
   (dm/str "filter-" (uuid/next)))
 
-;; TODO: ask about this, we need to add background-blur here as well?
+;; TODO_BLUR: ask about this, we need to add background-blur here as well?
 (defn filter-str
   [filter-id shape]
   (when (or (seq (->> (:shadow shape) (remove :hidden)))

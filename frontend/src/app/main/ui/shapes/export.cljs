@@ -216,7 +216,7 @@
            :penpot:blur (str blur)
            :penpot:spread (str spread)}])))
 
-;; TODO; ask about this
+;; TODO_BLUR: ask about this
 (defn- export-blur-data [{:keys [blur]}]
   (when-let [{:keys [type hidden value]} blur]
     (mf/html

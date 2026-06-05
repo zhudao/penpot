@@ -177,6 +177,15 @@
     :hidden false}
    blur))
 
+(defn- background-blur-defaults
+  [blur]
+  (d/patch-object
+   {:id (uuid/next)
+    :type :background-blur
+    :value 4
+    :hidden false}
+   blur))
+
 (defn commit-fills!
   [plugin-id ^js self value]
   (let [shape (u/proxy->shape self)
@@ -519,7 +528,7 @@
               (if (nil? value)
                 (st/emit! (dwsh/update-shapes [id] #(dissoc % :background-blur)))
                 (let [id (obj/get self "$id")
-                      value (blur-defaults (parser/parse-blur value))]
+                      value (background-blur-defaults (parser/parse-blur value))]
                   (cond
                     (not (sm/validate ctsbb/schema:background-blur value))
                     (u/not-valid plugin-id :background-blur value)

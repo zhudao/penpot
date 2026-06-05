@@ -96,7 +96,7 @@
         [shadow-ids]
         (get-attrs shapes objects :shadow)
 
-        ;; TODO modify this to add background-blur as well
+        ;; TODO_BLUR: modify this to add background-blur as well
         [blur-ids blur-values]
         (get-attrs shapes objects :blur)
 

@@ -16,7 +16,7 @@
                :content [{:tag :feOffset :attrs {:dx "2" :dy "3"}}
                          {:tag :feGaussianBlur :attrs {:stdDeviation "4"}}]}}})
 
-;;TODO: ask about this
+;;TODO_BLUR: ask about this
 (deftest derives-blur-and-shadow-from-svg-filter
   (let [shape  (svg-filters/apply-svg-filters sample-filter-shape)
         blur   (:blur shape)

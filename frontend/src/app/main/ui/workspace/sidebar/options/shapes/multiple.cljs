@@ -409,7 +409,7 @@
         [shadow-ids shadow-values]
         (get-attrs shapes objects :shadow)
 
-        ;;TODO: ask about this, should we consider background-blur for the multiple selection?
+        ;;TODO_BLUR: ask about this, should we consider background-blur for the multiple selection?
         [blur-ids blur-values]
         (get-attrs shapes objects :blur)
 

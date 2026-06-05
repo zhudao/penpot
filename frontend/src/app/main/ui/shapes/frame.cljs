@@ -67,7 +67,7 @@
 
         filter-id-blur     (dm/fmt "filter-blur-%" render-id)
         filter-id-shadows  (dm/fmt "filter-shadow-%" render-id)
-        ;; ????????? why are these crossed? do we need to add background-blur here as well?
+        ;; TODO_BLUR: why are these crossed? do we need to add background-blur here as well?
         filter-str-blur    (filters/filter-str filter-id-blur (dissoc shape :shadow))
         filter-str-shadows (filters/filter-str filter-id-shadows (dissoc shape :blur))
 

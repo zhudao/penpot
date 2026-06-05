@@ -94,9 +94,11 @@
                 (not= :svg (dm/get-in shape [:content :tag])))
            ;; If no shadows or blur, we return the selrect as is
            (and (empty? (-> shape :shadow))
-                ;; TODO: not sure about this.
+                ;;TODO_BLUR: not sure about this.
                 (or (and (nil? (:background-blur shape))(nil? (:blur shape)))
-                    (zero? (-> shape :blur :value (or 0))))))
+                    (zero? (and 
+                            (-> shape :background-blur :value (or 0))
+                            (-> shape :blur :value (or 0)))))))
      (dm/get-prop shape :selrect)
      (let [filters    (shape->filters shape)
            blur-value (or (-> shape :blur :value) 0)
