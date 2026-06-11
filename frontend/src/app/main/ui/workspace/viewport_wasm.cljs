@@ -652,9 +652,9 @@
        (when show-text-editor?
          (cond
            (features/active-feature? @st/state "text-editor-wasm/v1")
-           [:& editor-v3/text-editor {:shape editing-shape
-                                      :canvas-ref canvas-ref
-                                      :ref text-editor-ref}]
+           [:> editor-v3/text-editor* {:shape editing-shape
+                                       :canvas-ref canvas-ref
+                                       :ref text-editor-ref}]
 
            (features/active-feature? @st/state "text-editor/v2")
            [:& editor-v2/text-editor {:shape editing-shape
@@ -725,33 +725,33 @@
            :zoom zoom}])
 
        (when show-padding?
-         [:& mfc/padding-control
+         [:> mfc/padding-control*
           {:frame first-shape
            :hover @frame-hover
            :zoom zoom
-           :alt? @alt?
-           :shift? @shift?
+           :is-alt @alt?
+           :is-shift @shift?
            :on-move-selected on-move-selected
            :on-context-menu on-menu-selected}])
 
        (when show-padding?
-         [:& mfc/gap-control
+         [:> mfc/gap-control*
           {:frame first-shape
            :hover @frame-hover
            :zoom zoom
-           :alt? @alt?
-           :shift? @shift?
+           :is-alt @alt?
+           :is-shift @shift?
            :on-move-selected on-move-selected
            :on-context-menu on-menu-selected}])
 
        (when show-margin?
-         [:& mfc/margin-control
+         [:> mfc/margin-control*
           {:shape first-shape
            :parent selected-frame
            :hover @frame-hover
            :zoom zoom
-           :alt? @alt?
-           :shift? @shift?}])
+           :is-alt @alt?
+           :is-shift @shift?}])
 
        (when-not shapes-loading?
          [:> widgets/frame-titles*
