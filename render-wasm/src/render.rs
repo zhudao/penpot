@@ -236,20 +236,20 @@ impl NodeRenderState {
 #[derive(Clone)]
 pub struct FocusMode {
     shapes: Vec<Uuid>,
-    active: bool,
+    depth: u32,
 }
 
 impl FocusMode {
     pub fn new() -> Self {
         FocusMode {
             shapes: Vec::new(),
-            active: false,
+            depth: 0,
         }
     }
 
     pub fn clear(&mut self) {
         self.shapes.clear();
-        self.active = false;
+        self.depth = 0;
     }
 
     pub fn set_shapes(&mut self, shapes: Vec<Uuid>) {
@@ -263,23 +263,23 @@ impl FocusMode {
     }
 
     pub fn enter(&mut self, id: &Uuid) {
-        if !self.active && self.should_focus(id) {
-            self.active = true;
+        if self.should_focus(id) {
+            self.depth += 1;
         }
     }
 
     pub fn exit(&mut self, id: &Uuid) {
-        if self.active && self.should_focus(id) {
-            self.active = false;
+        if self.should_focus(id) && self.depth > 0 {
+            self.depth -= 1;
         }
     }
 
     pub fn is_active(&self) -> bool {
-        self.active
+        self.depth > 0
     }
 
     pub fn reset(&mut self) {
-        self.active = false;
+        self.depth = 0;
     }
 }
 
@@ -649,10 +649,7 @@ impl RenderState {
         {
             return;
         }
-        let blur = match shape
-            .blur
-            .filter(|b| !b.hidden && b.blur_type == BlurType::BackgroundBlur)
-        {
+        let blur = match shape.visible_background_blur() {
             Some(blur) => blur,
             None => return,
         };
@@ -865,8 +862,10 @@ impl RenderState {
             self.surfaces.clear_target(skia::Color::TRANSPARENT);
             self.surfaces.copy_backbuffer_to_target_replace();
         } else {
-            self.surfaces.copy_backbuffer_to_target();
+            self.surfaces
+                .copy_backbuffer_to_target(self.background_color);
         }
+
         if self.options.is_debug_visible() {
             debug::render(self);
         }
@@ -968,7 +967,8 @@ impl RenderState {
 
         // Viewer masked passes render a partial scene. Reusing the tile texture cache would
         // SrcOver-blend onto textures from the previous pass and leak pixels into the blob.
-        if self.viewer_masked_pass() {
+        // `render_sync_shape` (viewer/thumbnails) uses the same direct backbuffer path.
+        if self.viewer_masked_pass() || self.viewer_render_root.is_some() {
             // Use viewbox-aligned bounds (not grid-snapped) to match interactive-transform
             // compositing and avoid a visible offset vs the DOM canvas.
             let tile_rect = self.get_current_tile_bounds()?;
@@ -1205,6 +1205,7 @@ impl RenderState {
             && parent_shadows.is_none()
             && !shape.needs_layer()
             && shape.blur.is_none()
+            && shape.background_blur.is_none()
             && !has_inherited_blur
             && shape.shadows.is_empty()
             && shape.transform.is_identity()
@@ -1314,20 +1315,9 @@ impl RenderState {
         // We don't want to change the value in the global state
         let mut shape: Cow<Shape> = Cow::Borrowed(shape);
 
-        // Remove background blur from the shape so it doesn't get processed
-        // as a layer blur. The actual rendering is done before the save_layer
-        // in render_background_blur() so it's independent of shape opacity.
-        if !skip_effects
-            && apply_to_current_surface
-            && fills_surface_id == SurfaceId::Fills
-            && !matches!(shape.shape_type, Type::Text(_))
-            && !matches!(shape.shape_type, Type::SVGRaw(_))
-            && shape
-                .blur
-                .is_some_and(|b| !b.hidden && b.blur_type == BlurType::BackgroundBlur)
-        {
-            shape.to_mut().set_blur(None);
-        }
+        // Background blur is stored separately (shape.background_blur) and is
+        // rendered before the save_layer in render_background_blur(), so here
+        // shape.blur only ever holds a layer blur.
 
         let frame_has_blur = Self::frame_clip_layer_blur(&shape).is_some();
         let shape_has_blur = shape.blur.is_some();
@@ -2603,8 +2593,6 @@ impl RenderState {
             let layer_rec = skia::canvas::SaveLayerRec::default().paint(&paint);
             self.surfaces.canvas(target_surface).save_layer(&layer_rec);
         }
-
-        self.focus_mode.enter(&element.id);
     }
 
     #[inline]
@@ -2837,6 +2825,7 @@ impl RenderState {
 
         plain_shape_mut.clear_shadows();
         plain_shape_mut.blur = None;
+        plain_shape_mut.background_blur = None;
 
         // Shadow rendering uses a single render_shape call with no render_shape_exit,
         // so strokes must be drawn here. Disable clip_content to avoid skip_strokes
@@ -3640,10 +3629,8 @@ impl RenderState {
                 // assigned to this tile) because the blur snapshots Current
                 // which must contain the shapes behind it.
                 let tile_has_bg_blur = ids.iter().any(|id| {
-                    tree.get(id).is_some_and(|s| {
-                        s.blur
-                            .is_some_and(|b| !b.hidden && b.blur_type == BlurType::BackgroundBlur)
-                    })
+                    tree.get(id)
+                        .is_some_and(|s| s.visible_background_blur().is_some())
                 });
 
                 // We only need first level shapes, in the same order as the parent node.
