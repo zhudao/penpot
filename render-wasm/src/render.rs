@@ -401,6 +401,11 @@ pub(crate) struct RenderState {
     /// interactive backdrop exactly once per gesture (first rAF) so we don't
     /// repeatedly overwrite tiles that have already been updated.
     pub interactive_target_seeded: bool,
+    /// When true, the next `start_render_loop` keeps the last presented `Target`
+    /// pixels instead of clearing the canvas. Set after incremental shape updates
+    /// (e.g. adding a rect) so the workspace stays visible while only affected
+    /// tiles are re-rendered asynchronously.
+    pub preserve_target_during_render: bool,
     /// GPU crops from `Backbuffer` or tile atlas keyed by shape id. Filled on full-frame completion; during
     /// drag, entries for the moved top-level selection are ensured here
     pub backbuffer_crop_cache: HashMap<Uuid, InteractiveDragCrop>,
@@ -584,6 +589,7 @@ impl RenderState {
             cache_cleared_this_render: false,
             current_tile_had_shapes: false,
             interactive_target_seeded: false,
+            preserve_target_during_render: false,
             backbuffer_crop_cache: HashMap::default(),
         })
     }
@@ -673,7 +679,6 @@ impl RenderState {
                 None => return,
             };
 
-        let target_surface_snapshot = self.surfaces.snapshot(target_surface);
         let translation = self
             .surfaces
             .get_render_context_translation(self.render_area, scale);
@@ -720,17 +725,33 @@ impl RenderState {
             }
         }
 
-        // Reset matrix so snapshot draws pixel-for-pixel on the surface.
-        // Clips survive reset_matrix (stored in device coords).
+        // Reset matrix so the blur is applied in device space (sigma is already
+        // scaled by the zoom). Clips survive reset_matrix (stored in device coords).
         canvas.reset_matrix();
 
-        // Use Src blend to replace content within the clip with the
-        // blurred version (not SrcOver which would double-render).
+        // Apply the blur as a backdrop filter on a save_layer. A backdrop filter
+        // samples the *current device* contents (respecting the active clip),
+        // which includes whatever has been drawn so far — including any in-flight
+        // ancestor save_layer, such as a parent frame with opacity < 100% or a
+        // non-default blend mode. This way the background blur reflects the actual
+        // pixels behind the shape regardless of the layer stack. Src blend makes
+        // the layer replace the clipped region with the blurred backdrop instead
+        // of compositing over it (which would double-render the backdrop).
         let mut paint = skia::Paint::default();
-        paint.set_image_filter(blur_filter);
         paint.set_blend_mode(skia::BlendMode::Src);
-        canvas.draw_image(&target_surface_snapshot, (0, 0), Some(&paint));
+        let layer_rec = skia::canvas::SaveLayerRec::default()
+            .backdrop(&blur_filter)
+            .backdrop_tile_mode(skia::TileMode::Clamp)
+            .paint(&paint);
+        canvas.save_layer(&layer_rec);
 
+        // Two restores are required, balancing two separate pushes:
+        // 1. this restore pops the save_layer above; it is the step that composites
+        //    the blurred-backdrop layer back onto the canvas (with the Src paint),
+        //    so it is what actually produces the blurred output.
+        // 2. the final restore pops the canvas.save() above, removing the shape clip
+        //    and the scale/translate/transform so they don't leak into later drawing.
+        canvas.restore();
         canvas.restore();
     }
 
@@ -1994,6 +2015,24 @@ impl RenderState {
             self.surfaces
                 .draw_atlas_to_backbuffer(self.viewbox, bg_color);
 
+            // For pure pan (same zoom), overlay any cached per-tile textures on top of the atlas.
+            // This reduces the "rubbery"/distorted look of atlas-only previews while keeping
+            // fast-mode responsive. For zoom, the tile grid changes so cached tiles would be
+            // mispositioned — skip them.
+            if !self.zoom_changed() {
+                let visible_rect = tiles::get_tiles_for_viewbox(&self.viewbox);
+                let offset = self.viewbox.get_offset();
+                for tx in visible_rect.x1()..=visible_rect.x2() {
+                    for ty in visible_rect.y1()..=visible_rect.y2() {
+                        let tile = tiles::Tile::from(tx, ty);
+                        if self.surfaces.has_cached_tile_surface(tile) {
+                            let rect = tile.get_rect_with_offset(&offset);
+                            self.surfaces.draw_cached_tile_into_backbuffer(tile, &rect);
+                        }
+                    }
+                }
+            }
+
             self.present_frame(shapes);
             performance::end_measure!("render_from_cache");
             performance::end_timed_log!("render_from_cache", _start);
@@ -2169,6 +2208,9 @@ impl RenderState {
         self.surfaces.atlas.set_doc_bounds(doc_bounds);
 
         self.cache_cleared_this_render = false;
+        let preserve_target = self.preserve_target_during_render;
+        self.preserve_target_during_render = false;
+
         if self.options.is_interactive_transform() {
             // Keep `Target` as the previous frame and overwrite only the tiles
             // that changed. This avoids clearing + redrawing an atlas backdrop
@@ -2180,6 +2222,15 @@ impl RenderState {
                 // fast_mode skips cache updates and regardless of atlas coverage.
                 self.interactive_target_seeded = true;
             }
+        } else if preserve_target || self.zoom_changed() {
+            // Shape updates or zoom-end: keep the last presented frame on screen
+            // while tiles are re-rendered asynchronously. During zoom the
+            // preview from render_from_cache stays visible until the full-
+            // quality pass completes.
+            self.surfaces
+                .reset_interactive_transform(self.background_color);
+            self.surfaces.seed_backbuffer_from_target();
+            self.interactive_target_seeded = false;
         } else {
             self.reset_canvas();
             self.interactive_target_seeded = false;
@@ -2220,7 +2271,11 @@ impl RenderState {
         if sync_render {
             frame_type = self.render_shape_tree_sync(base_object, tree, timestamp)?;
         } else {
-            frame_type = self.continue_render_loop(base_object, tree, timestamp)?;
+            // Keep progressive yielding, except for a localized shape edit on a
+            // stable viewbox (e.g. recoloring) which renders in one frame.
+            let allow_stop =
+                !preserve_target || self.zoom_changed() || self.options.is_interactive_transform();
+            frame_type = self.continue_render_loop(base_object, tree, timestamp, allow_stop)?;
 
             // This is an option to debug frames.
             if self.options.capture_frames > 0 {
@@ -2280,9 +2335,11 @@ impl RenderState {
         base_object: Option<&Uuid>,
         tree: ShapesPoolRef,
         timestamp: i32,
+        allow_stop: bool,
     ) -> Result<FrameType> {
         performance::begin_measure!("continue_render_loop");
-        let frame_type = self.render_shape_tree_partial(base_object, tree, timestamp, true)?;
+        let frame_type =
+            self.render_shape_tree_partial(base_object, tree, timestamp, allow_stop)?;
 
         if !self.options.is_interactive_transform() {
             self.surfaces.draw_tile_atlas_to_backbuffer(
@@ -3941,6 +3998,7 @@ impl RenderState {
         let mut all_tiles = HashSet::<tiles::Tile>::new();
 
         let ids = std::mem::take(&mut self.touched_ids);
+        self.preserve_target_during_render = !ids.is_empty();
 
         for shape_id in ids.iter() {
             if let Some(shape) = tree.get(shape_id) {
