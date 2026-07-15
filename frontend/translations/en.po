@@ -5771,10 +5771,10 @@ msgid "subscription.dashboard.banner.unlock-features"
 msgstr "Unlock Enterprise features"
 
 #: src/app/main/ui/dashboard/subscription.cljs:203
-msgid "subscription.dashboard.banner.unlock-features-description"
+msgid "subscription.dashboard.banner.unlock-features-description-text"
 msgstr ""
-"Set fine-grained permissions and keep your design operations secure, "
-"without compromising the open-source freedom your team already loves."
+"Set fine-grained permissions and stay in control, "
+"without compromising the open-source freedom your team loves."
 
 #: src/app/main/ui/dashboard/subscription.cljs:208
 msgid "subscription.dashboard.banner.upgrade-nitrate"
@@ -8778,6 +8778,9 @@ msgstr "Copy as CSS (nested layers)"
 #: src/app/main/ui/workspace/context_menu.cljs:206
 msgid "workspace.shape.menu.copy-link"
 msgstr "Copy link"
+
+msgid "workspace.shape.menu.copy-id"
+msgstr "Copy id"
 
 #: src/app/main/ui/workspace/context_menu.cljs:219
 msgid "workspace.shape.menu.copy-paste-as"
