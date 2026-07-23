@@ -869,7 +869,7 @@ msgstr "Move to other team"
 
 #: src/app/main/ui/dashboard/sidebar.cljs:348, src/app/main/ui/dashboard/sidebar.cljs:349, src/app/main/ui/dashboard/sidebar.cljs:761
 msgid "dashboard.my-teams"
-msgstr "My teams"
+msgstr "My Teams"
 
 #: src/app/main/ui/dashboard/files.cljs:106, src/app/main/ui/dashboard/projects.cljs:253, src/app/main/ui/dashboard/projects.cljs:254
 msgid "dashboard.new-file"
@@ -1085,6 +1085,9 @@ msgstr "Searching for “%s“…"
 #: src/app/main/ui/dashboard/sidebar.cljs:354
 msgid "dashboard.section.organizations"
 msgstr "Organizations"
+
+msgid "dashboard.section.teams"
+msgstr "Teams"
 
 #, unused
 msgid "dashboard.select-org-modal.accept"
@@ -5042,9 +5045,17 @@ msgstr "This token does not exist or has been deleted."
 msgid "options.deleted-token-with-name"
 msgstr "{%s} token does not exist or has been deleted."
 
-#: src/app/plugins/utils.cljs:318
+#: src/app/plugins/utils.cljs:533
+msgid "plugins.validation.invalid-value"
+msgstr "expected %s, got %s (%s)"
+
+#: src/app/plugins/utils.cljs:547
 msgid "plugins.validation.message"
 msgstr "Field %s is invalid: %s"
+
+#: src/app/plugins/utils.cljs:536
+msgid "plugins.validation.received-value"
+msgstr "got %s (%s)"
 
 #: src/app/main/ui/auth/recovery.cljs:88
 msgid "profile.recovery.go-to-login"
@@ -8398,6 +8409,30 @@ msgstr "Gap"
 #: src/app/main/ui/workspace/sidebar/options/rows/stroke_row.cljs:268, src/app/main/ui/workspace/sidebar/options/rows/stroke_row.cljs:291
 msgid "workspace.options.stroke-width"
 msgstr "Stroke width"
+
+#: src/app/main/ui/workspace/sidebar/options/rows/stroke_row.cljs
+msgid "workspace.options.stroke-width-top"
+msgstr "Top (block start)"
+
+#: src/app/main/ui/workspace/sidebar/options/rows/stroke_row.cljs
+msgid "workspace.options.stroke-width-right"
+msgstr "Right (inline end)"
+
+#: src/app/main/ui/workspace/sidebar/options/rows/stroke_row.cljs
+msgid "workspace.options.stroke-width-bottom"
+msgstr "Bottom (block end)"
+
+#: src/app/main/ui/workspace/sidebar/options/rows/stroke_row.cljs
+msgid "workspace.options.stroke-width-left"
+msgstr "Left (inline start)"
+
+#: src/app/main/ui/workspace/sidebar/options/rows/stroke_row.cljs
+msgid "workspace.options.stroke.per-side"
+msgstr "Stroke per side"
+
+#: src/app/main/ui/workspace/sidebar/options/rows/stroke_row.cljs
+msgid "workspace.options.stroke.per-side-disabled"
+msgstr "Strokes per side feature is only available in the new render. Switch render to use it."
 
 #: src/app/main/ui/workspace/sidebar/options/menus/stroke.cljs:209
 msgid "workspace.options.stroke.add-stroke"

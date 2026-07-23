@@ -877,7 +877,7 @@ msgstr "Mover a otro equipo"
 
 #: src/app/main/ui/dashboard/sidebar.cljs:348, src/app/main/ui/dashboard/sidebar.cljs:349, src/app/main/ui/dashboard/sidebar.cljs:761
 msgid "dashboard.my-teams"
-msgstr "Mis equipos"
+msgstr "Mis Equipos"
 
 #: src/app/main/ui/dashboard/files.cljs:106, src/app/main/ui/dashboard/projects.cljs:253, src/app/main/ui/dashboard/projects.cljs:254
 msgid "dashboard.new-file"
@@ -1095,6 +1095,9 @@ msgstr "Buscando “%s“…"
 #: src/app/main/ui/dashboard/sidebar.cljs:354
 msgid "dashboard.section.organizations"
 msgstr "Organizaciones"
+
+msgid "dashboard.section.teams"
+msgstr "Equipos"
 
 #, unused
 msgid "dashboard.select-org-modal.accept"
@@ -8179,6 +8182,30 @@ msgstr "Color del trazo"
 #: src/app/main/ui/workspace/sidebar/options/rows/stroke_row.cljs:268, src/app/main/ui/workspace/sidebar/options/rows/stroke_row.cljs:291
 msgid "workspace.options.stroke-width"
 msgstr "Ancho del trazo"
+
+#: src/app/main/ui/workspace/sidebar/options/rows/stroke_row.cljs
+msgid "workspace.options.stroke-width-top"
+msgstr "Superior (block start)"
+
+#: src/app/main/ui/workspace/sidebar/options/rows/stroke_row.cljs
+msgid "workspace.options.stroke-width-right"
+msgstr "Derecha (inline end)"
+
+#: src/app/main/ui/workspace/sidebar/options/rows/stroke_row.cljs
+msgid "workspace.options.stroke-width-bottom"
+msgstr "Inferior (block end)"
+
+#: src/app/main/ui/workspace/sidebar/options/rows/stroke_row.cljs
+msgid "workspace.options.stroke-width-left"
+msgstr "Izquierda (inline start)"
+
+#: src/app/main/ui/workspace/sidebar/options/rows/stroke_row.cljs
+msgid "workspace.options.stroke.per-side"
+msgstr "Trazo Por Lado"
+
+#: src/app/main/ui/workspace/sidebar/options/rows/stroke_row.cljs
+msgid "workspace.options.stroke.per-side-disabled"
+msgstr "Strokes per side feature is only available in the new render. Switch render to use it."
 
 #: src/app/main/ui/workspace/sidebar/options/menus/stroke.cljs:209
 msgid "workspace.options.stroke.add-stroke"
