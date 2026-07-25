@@ -48,6 +48,7 @@
    [frontend-tests.plugins.value-objects-test]
    [frontend-tests.render-wasm.process-objects-test]
    [frontend-tests.svg-fills-test]
+   [frontend-tests.tokens.copy-paste-props-test]
    [frontend-tests.tokens.import-export-test]
    [frontend-tests.tokens.logic.token-actions-test]
    [frontend-tests.tokens.logic.token-data-test]
@@ -59,9 +60,11 @@
    [frontend-tests.ui.comments-clustering-test]
    [frontend-tests.ui.comments-position-modifier-test]
    [frontend-tests.ui.ds-controls-numeric-input-test]
+   [frontend-tests.ui.gradient-handlers-test]
    [frontend-tests.ui.layout-container-multiple-test]
    [frontend-tests.ui.measures-menu-props-test]
    [frontend-tests.ui.settings-password-schema-test]
+   [frontend-tests.ui.settings-shortcuts-test]
    [frontend-tests.util-clipboard-test]
    [frontend-tests.util-object-test]
    [frontend-tests.util-range-tree-test]
@@ -126,6 +129,7 @@
    'frontend-tests.plugins.value-objects-test
    'frontend-tests.render-wasm.process-objects-test
    'frontend-tests.svg-fills-test
+   'frontend-tests.tokens.copy-paste-props-test
    'frontend-tests.tokens.import-export-test
    'frontend-tests.tokens.logic.token-actions-test
    'frontend-tests.tokens.logic.token-data-test
@@ -137,9 +141,11 @@
    'frontend-tests.ui.comments-clustering-test
    'frontend-tests.ui.comments-position-modifier-test
    'frontend-tests.ui.ds-controls-numeric-input-test
+   'frontend-tests.ui.gradient-handlers-test
    'frontend-tests.ui.layout-container-multiple-test
    'frontend-tests.ui.measures-menu-props-test
    'frontend-tests.ui.settings-password-schema-test
+   'frontend-tests.ui.settings-shortcuts-test
    'frontend-tests.util-clipboard-test
    'frontend-tests.util-object-test
    'frontend-tests.util-range-tree-test
