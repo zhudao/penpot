@@ -21,6 +21,7 @@
   inline-size: 100%;
   z-index: var(--z-index-set);
   background-color: var(--overlay-color);
+  padding-inline-start: px2rem(272);
 }
 
 .modal-dialog {
@@ -139,6 +140,12 @@
 .default-command {
   background-color: var(--color-background-tertiary);
   color: var(--color-foreground-secondary);
+  border-radius: $br-6;
+}
+
+.customized-command {
+  background-color: var(--color-background-info);
+  color: var(--color-foreground-primary);
   border-radius: $br-6;
 }
 
