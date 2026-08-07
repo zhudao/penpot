@@ -7,6 +7,7 @@
 (ns app.rpc.commands.profile
   (:require
    [app.auth :as auth]
+   [app.auth.passwords :as passwords]
    [app.common.data :as d]
    [app.common.exceptions :as ex]
    [app.common.schema :as sm]
@@ -164,6 +165,9 @@
   ;; it or not for explicit locking and avoid concurrent updates of
   ;; the same row/object.
   (let [profile (get-profile conn profile-id ::db/for-update true)
+        fullname (d/normalize-string fullname)
+        lang     (d/normalize-string lang)
+        theme    (d/normalize-string theme)
         ;; Update the profile map with direct params
         profile (-> profile
                     (assoc :fullname fullname)
@@ -208,6 +212,9 @@
       (ex/raise :type :validation
                 :code :email-as-password
                 :hint "you can't use your email as password"))
+
+    ;; Validate password strength against common password dictionary
+    (passwords/validate-password (:password params))
 
     (update-profile-password! cfg (assoc profile :password password))
 

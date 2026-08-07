@@ -13,8 +13,17 @@
    [app.common.exceptions :as ex]
    [app.common.files.focus :as cpf]
    [app.common.files.helpers :as cfh]
+   [app.common.fonts :as cfnt]
    [app.common.logging :as log]
    [app.common.math :as mth]
+   [app.common.render-wasm.api.props :as props]
+   [app.common.render-wasm.helpers :as h]
+   [app.common.render-wasm.mem :as mem]
+   [app.common.render-wasm.mem.heap32 :as mem.h32]
+   [app.common.render-wasm.serialize-shape :as serialize-shape]
+   [app.common.render-wasm.serializers :as sr]
+   [app.common.render-wasm.serializers.color :as sr-clr]
+   [app.common.render-wasm.wasm :as wasm]
    [app.common.types.color :as clr]
    [app.common.types.fills :as types.fills]
    [app.common.types.path :as path]
@@ -31,23 +40,17 @@
    [app.main.router :as rt]
    [app.main.store :as st]
    [app.main.ui.shapes.text]
+   ;; Required for side effects: binds the generated enums.
+   [app.render-wasm.api.enums]
    [app.render-wasm.api.fonts :as f]
-   [app.render-wasm.api.props :as props]
    [app.render-wasm.api.texts :as t]
    [app.render-wasm.api.webgl :as webgl]
    [app.render-wasm.deserializers :as dr]
    [app.render-wasm.gesture :as wasm-gesture]
-   [app.render-wasm.helpers :as h]
-   [app.render-wasm.mem :as mem]
-   [app.render-wasm.mem.heap32 :as mem.h32]
    [app.render-wasm.performance :as perf]
    [app.render-wasm.rulers-state :as rulers-state]
-   [app.render-wasm.serialize-shape :as serialize-shape]
-   [app.render-wasm.serializers :as sr]
-   [app.render-wasm.serializers.color :as sr-clr]
    [app.render-wasm.svg-filters :as svg-filters]
    [app.render-wasm.text-editor :as text-editor]
-   [app.render-wasm.wasm :as wasm]
    [app.util.debug :as dbg]
    [app.util.dom :as dom]
    [app.util.functions :as fns]
@@ -711,6 +714,14 @@
     (request-render "apply-styles-to-selection")
     result))
 
+(defn apply-paragraph-attrs-to-selection
+  "Apply paragraph attrs to the paragraphs the editor selection touches.
+   Returns {:shape-id :content} for saving."
+  [attrs]
+  (let [result (text-editor/apply-paragraph-attrs-to-selection attrs use-shape set-shape-text-content)]
+    (request-render "apply-paragraph-attrs-to-selection")
+    result))
+
 (defn set-parent-id
   [id]
   (let [buffer (uuid/get-u32 id)]
@@ -1287,8 +1298,8 @@
                    langs)
 
             (let [text   (apply str (map :text spans))
-                  emoji? (if emoji? emoji? (t/contains-emoji? text))
-                  langs  (t/collect-used-languages langs text)]
+                  emoji? (if emoji? emoji? (cfnt/contains-emoji? text))
+                  langs  (cfnt/collect-used-languages langs text)]
 
               ;; FIXME: this should probably be somewhere else
               (when fallback-fonts-only? (t/write-shape-text spans paragraph text))
@@ -1299,8 +1310,8 @@
 
         (let [updated-fonts
               (-> #{}
-                  (cond-> ^boolean emoji? (f/add-emoji-font))
-                  (f/add-noto-fonts langs))
+                  (cond-> ^boolean emoji? (cfnt/add-emoji-font))
+                  (cfnt/add-noto-fonts langs))
               fallback-fonts (filter #(get % :is-fallback) updated-fonts)]
 
           (if fallback-fonts-only? updated-fonts fallback-fonts))))))
@@ -1406,7 +1417,7 @@
     ;; this implicitly (`zoom_changed`); this extends it to pan/resize-triggered
     ;; ends (e.g. selecting a shape opens the options panel and resizes the
     ;; viewport), which previously blanked.
-    (internal-render 0 RENDER-FLAG-SYNC-TILES)
+    (internal-render (js/performance.now) RENDER-FLAG-SYNC-TILES)
     ;; The direct render above bypasses the rAF `render` loop, so repaint the
     ;; editor overlay explicitly. Only when this was a full frame: a progressive
     ;; render keeps painting through the rAF loop and its partial frames must not
@@ -1421,7 +1432,7 @@
               (if (view-gesture-active?)
                 ;; Pan/zoom pause: render without ending the interaction.
                 (do
-                  (internal-render 0 RENDER-FLAG-SYNC-TILES)
+                  (internal-render (js/performance.now) RENDER-FLAG-SYNC-TILES)
                   (render-text-editor-overlay-after-frame!))
                 (finalize-view-interaction!))))]
     (fns/debounce do-render DEBOUNCE_DELAY_MS)))

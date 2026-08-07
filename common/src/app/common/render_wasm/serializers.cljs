@@ -4,16 +4,16 @@
 ;;
 ;; Copyright (c) KALEIDOS INC Sucursal en España SL
 
- (ns app.render-wasm.serializers
+ (ns app.common.render-wasm.serializers
    (:require
     [app.common.data :as d]
     [app.common.data.macros :as dm]
     [app.common.files.helpers :as cfh]
+    [app.common.render-wasm.serializers.color :as sr-clr]
+    [app.common.render-wasm.wasm :as wasm]
     [app.common.types.color :as clr]
     [app.common.types.shape-tree :as ctst]
     [app.common.uuid :as uuid]
-    [app.render-wasm.serializers.color :as sr-clr]
-    [app.render-wasm.wasm :as wasm]
     [cuerdas.core :as str]))
 
 (defn u8
@@ -116,13 +116,13 @@
 (defn translate-constraint-h
   [type]
   (let [values (unchecked-get wasm/serializers "constraint-h")
-        default 5] ;; TODO: fix code in rust so we have a proper None variant
+        default (unchecked-get values "none")]
     (d/nilv (unchecked-get values (d/name type)) default)))
 
 (defn translate-constraint-v
   [type]
   (let [values (unchecked-get wasm/serializers "constraint-v")
-        default 5] ;; TODO: fix code in rust so we have a proper None variant
+        default (unchecked-get values "none")]
     (d/nilv (unchecked-get values (d/name type)) default)))
 
 (defn translate-bool-type
