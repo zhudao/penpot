@@ -83,6 +83,7 @@
 ;; `penpot:wasm:tiles-complete`.
 ;;
 ;; - `page-transition?`: true while the overlay should be considered active.
+;;   Pan/zoom into WASM is frozen until `tiles-complete` (atlas still empty).
 ;; - `transition-image*`: image shown by the UI overlay (usually an `ImageBitmap`
 ;;   snapshot of the WebGL canvas; on initial load it may be a tiny SVG data-url
 ;;   string derived from the page background color).
@@ -92,6 +93,8 @@
 ;;   `penpot:wasm:tiles-complete`, so we can remove/replace it safely.
 (defonce page-transition? (atom false))
 (defonce context-loss-overlay? (atom false))
+;; Skipped set-view-box during transition; flushed when the overlay ends.
+(defonce ^:private viewport-dirty-during-transition? (atom false))
 ;; When true (initial load) the overlay clips out the ruler strips so the live
 ;; rulers show through. False (page switch / context loss) keeps the snapshot's
 ;; baked-in rulers full-bleed to avoid a blank-strip flicker on canvas remount.
@@ -114,6 +117,8 @@
   []
   (wasm/ready?))
 
+(declare sync-workspace-local-viewport!)
+
 
 (defn set-transition-image-from-background!
   "Sets `transition-image*` to a data URL representing a solid background color."
@@ -128,6 +133,7 @@
 (defn begin-page-transition!
   []
   (reset! page-transition? true)
+  (reset! viewport-dirty-during-transition? false)
   (swap! transition-epoch* inc))
 
 (defn end-page-transition!
@@ -136,7 +142,11 @@
   (when-let [prev @transition-tiles-handler*]
     (.removeEventListener ^js ug/document "penpot:wasm:tiles-complete" prev))
   (reset! transition-tiles-handler* nil)
-  (reset! transition-image* nil))
+  (reset! transition-image* nil)
+  ;; Keyboard/wheel may have moved workspace-local while WASM was frozen.
+  (when (and (initialized?) @viewport-dirty-during-transition?)
+    (reset! viewport-dirty-during-transition? false)
+    (sync-workspace-local-viewport! @st/state)))
 
 (defn- set-transition-tiles-complete-handler!
   "Installs a tiles-complete handler bound to the current transition epoch.
@@ -1383,7 +1393,9 @@
 
 (defn view-interaction-start!
   []
-  (when (and (initialized?) (not @view-interaction-active?))
+  (when (and (initialized?)
+             (not @page-transition?)
+             (not @view-interaction-active?))
     (h/call wasm/internal-module "_set_view_start")
     (reset! view-interaction-active? true)))
 
@@ -1463,25 +1475,29 @@
 
 (defn set-view-box
   [zoom vbox]
-  (when (initialized?)
-    (perf/begin-measure "set-view-box")
-    (view-interaction-start!)
-    (h/call wasm/internal-module "_set_view" zoom (- (:x vbox)) (- (:y vbox)))
-    (perf/end-measure "set-view-box")
+  ;; Frozen during page transition: tile atlas is empty/incomplete and
+  ;; render_from_cache would present a blank workspace.
+  (if @page-transition?
+    (reset! viewport-dirty-during-transition? true)
+    (when (initialized?)
+      (perf/begin-measure "set-view-box")
+      (view-interaction-start!)
+      (h/call wasm/internal-module "_set_view" zoom (- (:x vbox)) (- (:y vbox)))
+      (perf/end-measure "set-view-box")
 
-    (perf/begin-measure "render-from-cache")
-    (h/call wasm/internal-module "_render_from_cache" 0)
-    ;; Keep the text-editor caret/selection glued to the shapes while the view
-    ;; changes. `_render_from_cache` re-composites shapes + UI at the new viewbox
-    ;; but omits the editor overlay, so without this the selection would vanish for
-    ;; the whole pan/zoom gesture and only flash back when the debounced full
-    ;; render lands — the blink seen when zooming in/out over a selection at high
-    ;; zoom (gh-10709). `_text_editor_render_overlay` draws straight onto the
-    ;; freshly composited Target (no Backbuffer re-compose) and no-ops when no
-    ;; editor is active.
-    (render-text-editor-overlay-if-active!)
-    (render-finish)
-    (perf/end-measure "render-from-cache")))
+      (perf/begin-measure "render-from-cache")
+      (h/call wasm/internal-module "_render_from_cache" 0)
+      ;; Keep the text-editor caret/selection glued to the shapes while the view
+      ;; changes. `_render_from_cache` re-composites shapes + UI at the new viewbox
+      ;; but omits the editor overlay, so without this the selection would vanish for
+      ;; the whole pan/zoom gesture and only flash back when the debounced full
+      ;; render lands — the blink seen when zooming in/out over a selection at high
+      ;; zoom (gh-10709). `_text_editor_render_overlay` draws straight onto the
+      ;; freshly composited Target (no Backbuffer re-compose) and no-ops when no
+      ;; editor is active.
+      (render-text-editor-overlay-if-active!)
+      (render-finish)
+      (perf/end-measure "render-from-cache"))))
 
 (defn sync-workspace-local-viewport!
   "Pushes `[:workspace-local :zoom]` and `:vbox` into WASM."
@@ -2177,15 +2193,31 @@
   (when (wasm/live?)
     (h/call wasm/internal-module "_set_render_options" (debug-flags) new-dpr)))
 
+(def ^:private max-surface-size
+  ;; Must match `gpu_state::MAX_SURFACE_SIZE`.
+  8192)
+
+(defn- clamp-physical-size
+  "Clamp physical pixel dimensions before assigning `canvas.width/height`.
+  Rust `resize` applies the same cap and syncs the effective DPR from the
+  real drawing buffer."
+  [w h]
+  (let [w     (mth/max 1 w)
+        h     (mth/max 1 h)
+        scale (mth/min 1 (/ max-surface-size w) (/ max-surface-size h))]
+    [(mth/max 1 (mth/floor (* scale w)))
+     (mth/max 1 (mth/floor (* scale h)))]))
+
 (defn resize-offscreen-canvas!
   "Resize a persistent OffscreenCanvas to new physical-pixel dimensions and
   update the WASM render surfaces accordingly (via `_resize_viewbox`). The
   design state (shape pool) is preserved so `set-objects` is not needed again."
   [canvas new-physical-w new-physical-h]
   (when (wasm/live?)
-    (let [dpr (get-dpr)]
-      (set! (.-width canvas) new-physical-w)
-      (set! (.-height canvas) new-physical-h)
+    (let [dpr (get-dpr)
+          [pw ph] (clamp-physical-size new-physical-w new-physical-h)]
+      (set! (.-width canvas) pw)
+      (set! (.-height canvas) ph)
       (set-render-options! dpr)
       (resize-viewbox (/ new-physical-w dpr) (/ new-physical-h dpr)))))
 
@@ -2220,9 +2252,14 @@
    (resize-canvas! canvas (get-dpr)))
   ([canvas new-dpr]
    (when (wasm/live?)
-     (let [[css-w css-h] (canvas-css-size canvas new-dpr)]
-       (set! (.-width ^js canvas) (* new-dpr css-w))
-       (set! (.-height ^js canvas) (* new-dpr css-h))
+     (let [[css-w css-h] (canvas-css-size canvas new-dpr)
+           css-w         (mth/max 1 css-w)
+           css-h         (mth/max 1 css-h)
+           [phys-w phys-h] (clamp-physical-size
+                            (mth/floor (* css-w new-dpr))
+                            (mth/floor (* css-h new-dpr)))]
+       (set! (.-width ^js canvas) phys-w)
+       (set! (.-height ^js canvas) phys-h)
        (set-render-options! new-dpr)
        (resize-viewbox css-w css-h)))))
 

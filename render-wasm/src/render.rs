@@ -34,7 +34,7 @@ use crate::shapes::{
 use crate::state::{ShapesPoolMutRef, ShapesPoolRef};
 use crate::tiles::{self, PendingTiles, TileRect};
 use crate::uuid::Uuid;
-use crate::view::Viewbox;
+use crate::view::{self, Viewbox};
 use crate::wapi;
 use crate::{get_gpu_state, get_resources, performance};
 
@@ -417,6 +417,8 @@ pub(crate) struct RenderState {
     /// shadow. A full skip made flush_and_submit very slow (Skia ops-task
     /// ordering); doing it per shape was wasted GPU work.
     pub drop_shadows_ops_warmed: bool,
+    /// Filter-surface snapshots for drop shadows, reused across tiles.
+    drop_shadow_filter_cache: shadows::DropShadowFilterCache,
 }
 
 pub struct InteractiveDragCrop {
@@ -551,6 +553,9 @@ impl RenderState {
     pub fn try_new(width: i32, height: i32) -> Result<RenderState> {
         // This needs to be done once per WebGL context.
         let sampling_options = get_resources().sampling_options;
+        let max_dim = get_gpu_state().max_surface_size();
+        let width = width.clamp(1, max_dim);
+        let height = height.clamp(1, max_dim);
 
         let surfaces = Surfaces::try_new(
             (width, height),
@@ -601,6 +606,7 @@ impl RenderState {
             backbuffer_crop_cache: HashMap::default(),
             tile_atlas_flushed: false,
             drop_shadows_ops_warmed: false,
+            drop_shadow_filter_cache: shadows::DropShadowFilterCache::new(),
         })
     }
 
@@ -875,25 +881,29 @@ impl RenderState {
     pub fn set_dpr(&mut self, dpr: f32) -> Result<()> {
         // Only when this function returns true (it means the value
         // was properly changed) the rest of the functions is called.
+        // Surface/viewbox pixel size is updated by `resize` after the
+        // canvas backing store is set, so we do not resize here with a
+        // stale CSS size (that desyncs Skia vs the GL framebuffer).
         if self.options.set_dpr(dpr) {
+            self.viewbox.set_dpr(dpr);
             self.tile_viewbox
                 .set_interest(self.options.dpr_viewport_interest_area_threshold);
-            self.resize(
-                self.viewbox.width().floor() as i32,
-                self.viewbox.height().floor() as i32,
-            )?;
             get_resources().fonts.set_scale_debug_font(dpr);
-            self.viewbox.set_dpr(dpr);
             self.surfaces.set_dpr(dpr);
         }
         Ok(())
+    }
+
+    pub fn ensure_tile_atlas_layout(&mut self) {
+        self.surfaces
+            .ensure_tile_atlas_layout(self.tile_viewbox.interest_rect.len().max(1) as usize);
     }
 
     pub fn set_antialias_threshold(&mut self, value: f32) {
         self.options.set_antialias_threshold(value);
     }
 
-    pub fn set_viewport_interest_area_threshold(&mut self, value: i32) {
+    pub fn set_viewport_interest_area_threshold(&mut self, value: i32) -> Result<()> {
         // Only when this function returns true (it means the value
         // was changed properly) the tile_viewbox.set_interest is called.
         if self.options.set_viewport_interest_area_threshold(value) {
@@ -902,7 +912,10 @@ impl RenderState {
             // affect pending_tiles generation.
             self.tile_viewbox
                 .set_interest(self.options.dpr_viewport_interest_area_threshold);
+            self.tile_viewbox.update(&self.viewbox);
+            self.ensure_tile_atlas_layout();
         }
+        Ok(())
     }
 
     pub fn set_node_batch_threshold(&mut self, value: i32) {
@@ -926,11 +939,27 @@ impl RenderState {
     }
 
     pub fn resize(&mut self, width: i32, height: i32) -> Result<()> {
-        let dpr_width = (width as f32 * self.options.dpr).floor() as i32;
-        let dpr_height = (height as f32 * self.options.dpr).floor() as i32;
+        let gpu_state = get_gpu_state();
+        let max_dim = gpu_state.max_surface_size();
+        let css_w = (width as f32).max(1.0);
+        let css_h = (height as f32).max(1.0);
+        let dpr = view::clamp_dpr_for_surface(css_w, css_h, self.options.dpr, max_dim);
+        let mut dpr_width = ((css_w * dpr).floor() as i32).clamp(1, max_dim);
+        let mut dpr_height = ((css_h * dpr).floor() as i32).clamp(1, max_dim);
+        // Prefer the real GL drawing buffer: wrap_backend_render_target
+        // binds the default framebuffer, whose origin is bottom-left.
+        if let Some((fb_w, fb_h)) = gpu_state.drawing_buffer_size() {
+            dpr_width = fb_w.clamp(1, max_dim);
+            dpr_height = fb_h.clamp(1, max_dim);
+        }
+        let effective_dpr = (dpr_width as f32 / css_w).min(dpr_height as f32 / css_h);
+        if (effective_dpr - self.options.dpr).abs() > f32::EPSILON {
+            self.set_dpr(effective_dpr)?;
+        }
         self.surfaces.resize(dpr_width, dpr_height)?;
-        self.viewbox.set_wh(width as f32, height as f32);
+        self.viewbox.set_wh(css_w, css_h);
         self.tile_viewbox.update(&self.viewbox);
+        self.ensure_tile_atlas_layout();
 
         Ok(())
     }
@@ -1080,15 +1109,20 @@ impl RenderState {
         }
 
         let fast_mode = self.options.is_fast_mode();
+        // During pan/zoom (fast mode) tiles are rendered without shadows/blur.
+        // Do not write them into the doc/tile atlases: render_from_cache overlays
+        // HQ tile textures on the scaled doc-atlas backdrop, and shadowless tiles
+        // would leave permanent holes until the post-gesture full render.
+        if fast_mode {
+            return Ok(());
+        }
         // Decide *now* (at the first real cache blit) whether we need to clear Cache.
         // This avoids clearing Cache on renders that don't actually paint tiles (e.g. hover/UI),
         // while still preventing stale pixels from surviving across full-quality renders.
-        if !fast_mode && !self.cache_cleared_this_render {
+        if !self.cache_cleared_this_render {
             self.surfaces.clear_cache(self.background_color);
             self.cache_cleared_this_render = true;
         }
-        // In fast mode the viewport is moving (pan/zoom) so Cache surface
-        // positions would be wrong — only save to the tile HashMap.
         let tile_rect = self.get_current_aligned_tile_bounds()?;
 
         let current_tile = *self
@@ -1104,7 +1138,7 @@ impl RenderState {
             &self.tile_viewbox,
             &current_tile,
             &tile_rect,
-            fast_mode,
+            false,
             self.render_area,
         );
 
@@ -2274,6 +2308,7 @@ impl RenderState {
 
         // reorder by distance to the center.
         self.current_tile = None;
+        self.drop_shadow_filter_cache.clear();
     }
 
     pub fn start_render_loop(
@@ -2995,6 +3030,87 @@ impl RenderState {
         ))
     }
 
+    /// Renders descendant silhouettes into the current drop-shadow layer.
+    #[allow(clippy::too_many_arguments)]
+    fn render_drop_shadow_child_silhouettes(
+        &mut self,
+        element: &Shape,
+        tree: ShapesPoolRef,
+        shadow: &Shadow,
+        scale: f32,
+        inherited_layer_blur: Option<Blur>,
+        node_render_state: &NodeRenderState,
+        target_surface: SurfaceId,
+    ) -> Result<()> {
+        if matches!(element.shape_type, Type::Bool(_)) {
+            return Ok(());
+        }
+
+        let shadow_children = if element.is_recursive() {
+            get_simplified_children(tree, element)
+        } else {
+            Vec::new()
+        };
+
+        for shadow_shape_id in shadow_children.iter() {
+            let Some(shadow_shape) = tree.get(shadow_shape_id) else {
+                continue;
+            };
+            if shadow_shape.hidden {
+                continue;
+            }
+
+            let nested_clip_bounds =
+                node_render_state.get_nested_shadow_clip_bounds(element, shadow);
+
+            if !matches!(shadow_shape.shape_type, Type::Text(_)) {
+                self.render_drop_black_shadow(
+                    shadow_shape,
+                    &shadow_shape.extrect(tree, scale),
+                    shadow,
+                    nested_clip_bounds,
+                    scale,
+                    inherited_layer_blur,
+                    target_surface,
+                )?;
+            } else {
+                let paint = skia::Paint::default();
+                let layer_rec = skia::canvas::SaveLayerRec::default().paint(&paint);
+                self.surfaces
+                    .canvas(SurfaceId::DropShadows)
+                    .save_layer(&layer_rec);
+
+                let mut transformed_shadow: Cow<Shadow> = Cow::Borrowed(shadow);
+                transformed_shadow.to_mut().color = skia::Color::BLACK;
+                transformed_shadow.to_mut().blur = transformed_shadow.blur;
+                transformed_shadow.to_mut().spread = transformed_shadow.spread;
+
+                let mut new_shadow_paint = skia::Paint::default();
+                new_shadow_paint.set_image_filter(transformed_shadow.get_drop_shadow_filter());
+                new_shadow_paint.set_blend_mode(skia::BlendMode::SrcOver);
+
+                self.with_nested_blurs_suppressed(|state| {
+                    state.render_shape(
+                        shadow_shape,
+                        nested_clip_bounds,
+                        SurfaceId::DropShadows,
+                        SurfaceId::DropShadows,
+                        SurfaceId::DropShadows,
+                        SurfaceId::DropShadows,
+                        true,
+                        None,
+                        Some(vec![new_shadow_paint.clone()]),
+                        None,
+                        target_surface,
+                    )
+                })?;
+                self.surfaces.canvas(SurfaceId::DropShadows).restore();
+            }
+        }
+
+        Ok(())
+    }
+
     /// Renders a drop shadow effect for the given shape.
     ///
     /// Creates a black shadow by converting the original shadow color to black,
@@ -3140,10 +3256,30 @@ impl RenderState {
             return Ok(());
         }
 
-        // Adaptive downscale for large blur values (lossless GPU optimization).
-        // Bounds above were computed from the original sigma so filter surface coverage is correct.
-        // Maximum downscale is 1/BLUR_DOWNSCALE_THRESHOLD (i.e. 8x): beyond that the
-        // filter surface becomes too small and quality degrades noticeably.
+        // High zoom with blur: use render_into_filter_surface to ensure blur has enough space
+        // Apply spread geometrically to avoid dilate filter rounding issues
+        let layer_blur_value = combined_blur.map(|b| b.value).unwrap_or(0.0);
+        let cache_key = clip_bounds.is_none().then(|| {
+            shadows::DropShadowFilterCacheKey::for_shape(
+                shape.id,
+                shadow,
+                scale,
+                &shape.transform,
+                layer_blur_value,
+            )
+        });
+
+        if let Some(ref key) = cache_key {
+            if let Some(cached) = self.drop_shadow_filter_cache.lookup(key) {
+                shadows::blit_cached_drop_shadow_filter(
+                    &mut self.surfaces,
+                    cached,
+                    blur_filter.clone(),
+                );
+                return Ok(());
+            }
+        }
+
         let blur_downscale_threshold: f32 = self.options.blur_downscale_threshold;
         let min_blur_downscale: f32 = 1.0 / blur_downscale_threshold;
         let blur_downscale = if shadow.blur > blur_downscale_threshold {
@@ -3185,37 +3321,19 @@ impl RenderState {
         )?;
 
         if let Some((mut surface, filter_scale)) = filter_result {
-            let drop_canvas = self.surfaces.canvas(SurfaceId::DropShadows);
-            drop_canvas.save();
-            //drop_canvas.scale((scale, scale));
-            //drop_canvas.translate(translation);
-            let mut drop_paint = skia::Paint::default();
-            drop_paint.set_image_filter(blur_filter.clone());
-
-            // If we scaled down in the filter surface, we need to scale back up
-            if filter_scale < 1.0 {
-                drop_canvas.save();
-                drop_canvas.scale((1.0 / filter_scale, 1.0 / filter_scale));
-                drop_canvas.translate((bounds.left * filter_scale, bounds.top * filter_scale));
-                surface.draw(
-                    drop_canvas,
-                    (0.0, 0.0),
-                    get_resources().sampling_options,
-                    Some(&drop_paint),
-                );
-                drop_canvas.restore();
-            } else {
-                drop_canvas.save();
-                drop_canvas.translate((bounds.left, bounds.top));
-                surface.draw(
-                    drop_canvas,
-                    (0.0, 0.0),
-                    get_resources().sampling_options,
-                    Some(&drop_paint),
-                );
-                drop_canvas.restore();
+            let cached = shadows::CachedDropShadowFilter::new(
+                bounds,
+                filter_scale,
+                surface.image_snapshot(),
+            );
+            shadows::blit_cached_drop_shadow_filter(
+                &mut self.surfaces,
+                &cached,
+                blur_filter.clone(),
+            );
+            if let Some(key) = cache_key {
+                self.drop_shadow_filter_cache.store(key, cached);
             }
-            drop_canvas.restore();
         }
 
         Ok(())
@@ -3254,6 +3372,7 @@ impl RenderState {
         };
 
         let recursive = element.is_recursive();
+        let use_direct_container_shadow = element.uses_direct_container_drop_shadow(tree, scale);
         let mut rendered_any = false;
         for shadow in element.drop_shadows_visible() {
             if !shadow.is_perceptible_at_scale_for(scale, recursive) {
@@ -3266,78 +3385,35 @@ impl RenderState {
                 .canvas(SurfaceId::DropShadows)
                 .save_layer(&layer_rec);
 
-            self.render_drop_black_shadow(
-                element,
-                element_extrect,
-                shadow,
-                clip_bounds.clone(),
-                scale,
-                None,
-                target_surface,
-            )?;
-
-            if !matches!(element.shape_type, Type::Bool(_)) {
-                let shadow_children = if element.is_recursive() {
-                    get_simplified_children(tree, element)
-                } else {
-                    Vec::new()
-                };
-
-                for shadow_shape_id in shadow_children.iter() {
-                    let Some(shadow_shape) = tree.get(shadow_shape_id) else {
-                        continue;
-                    };
-                    if shadow_shape.hidden {
-                        continue;
-                    }
-
-                    let nested_clip_bounds =
-                        node_render_state.get_nested_shadow_clip_bounds(element, shadow);
-
-                    if !matches!(shadow_shape.shape_type, Type::Text(_)) {
-                        self.render_drop_black_shadow(
-                            shadow_shape,
-                            &shadow_shape.extrect(tree, scale),
-                            shadow,
-                            nested_clip_bounds,
-                            scale,
-                            inherited_layer_blur,
-                            target_surface,
-                        )?;
-                    } else {
-                        let paint = skia::Paint::default();
-                        let layer_rec = skia::canvas::SaveLayerRec::default().paint(&paint);
-                        self.surfaces
-                            .canvas(SurfaceId::DropShadows)
-                            .save_layer(&layer_rec);
-
-                        let mut transformed_shadow: Cow<Shadow> = Cow::Borrowed(shadow);
-                        transformed_shadow.to_mut().color = skia::Color::BLACK;
-                        transformed_shadow.to_mut().blur = transformed_shadow.blur;
-                        transformed_shadow.to_mut().spread = transformed_shadow.spread;
-
-                        let mut new_shadow_paint = skia::Paint::default();
-                        new_shadow_paint
-                            .set_image_filter(transformed_shadow.get_drop_shadow_filter());
-                        new_shadow_paint.set_blend_mode(skia::BlendMode::SrcOver);
-
-                        self.with_nested_blurs_suppressed(|state| {
-                            state.render_shape(
-                                shadow_shape,
-                                nested_clip_bounds,
-                                SurfaceId::DropShadows,
-                                SurfaceId::DropShadows,
-                                SurfaceId::DropShadows,
-                                SurfaceId::DropShadows,
-                                true,
-                                None,
-                                Some(vec![new_shadow_paint.clone()]),
-                                None,
-                                target_surface,
-                            )
-                        })?;
-                        self.surfaces.canvas(SurfaceId::DropShadows).restore();
-                    }
+            // Fast path: frame geometry only (no child silhouettes).
+            if use_direct_container_shadow {
+                shadows::render_direct_frame_drop_shadow(
+                    self,
+                    element,
+                    element_extrect,
+                    shadow,
+                    scale,
+                )?;
+            } else {
+                self.render_drop_black_shadow(
+                    element,
+                    element_extrect,
+                    shadow,
+                    clip_bounds.clone(),
+                    scale,
+                    None,
+                    target_surface,
+                )?;
+                if !element.container_fill_covers_shadow_descendants(tree, scale) {
+                    self.render_drop_shadow_child_silhouettes(
+                        element,
+                        tree,
+                        shadow,
+                        scale,
+                        inherited_layer_blur,
+                        node_render_state,
+                        target_surface,
+                    )?;
                 }
             }
 
@@ -4127,8 +4203,9 @@ impl RenderState {
     }
 
     /// Rebuild the tile index (shape→tile mapping) for all top-level shapes.
-    /// This does NOT invalidate the tile texture cache — cached tile images
-    /// survive so that fast-mode renders during pan still show shadows/blur.
+    /// This does NOT invalidate the tile texture cache — existing HQ tiles
+    /// survive across pan so `render_from_cache` keeps showing shadows/blur
+    /// until the post-gesture full render replaces them.
     pub fn rebuild_tile_index(&mut self, tree: ShapesPoolRef) {
         let zoom_changed = self.zoom_changed();
         performance::begin_measure!("rebuild_tile_index");
