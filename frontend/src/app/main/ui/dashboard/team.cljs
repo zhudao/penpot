@@ -2,7 +2,7 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) KALEIDOS INC Sucursal en España SL
+;; Copyright (c) KALEIDOS SUBSIDIARY SL
 
 (ns app.main.ui.dashboard.team
   (:require-macros [app.main.style :as stl])
@@ -140,23 +140,16 @@
         [:a {:on-click on-nav-settings} (tr "labels.settings")]]]]
      [:div {:class (stl/css :dashboard-buttons)}
       (when (and (or invitations-section? members-section?) (not-empty invitations))
-        (let [organization          (:organization team)
-              owners-only-invites?  (and (contains? cfg/flags :admin-console)
-                                         organization
-                                         (= (get-in organization [:permissions :send-invitations]) "owners"))
-              title-text            (if owners-only-invites?
-                                      (tr "dashboard.invite-profile-disabled.owners-only" (:name organization))
-                                      (tr "dashboard.invite-profile-disabled"))
-              invite-button         (mf/html
-                                     [:> button* {:class (stl/css :invite-button)
-                                                  :variant "secondary"
-                                                  :on-click on-invite-member
-                                                  :disabled (not can-invite?)
-                                                  :data-testid "invite-member"}
-                                      (tr "dashboard.invite-profile")])]
+        (let [invite-button (mf/html
+                             [:> button* {:class (stl/css :invite-button)
+                                          :variant "secondary"
+                                          :on-click on-invite-member
+                                          :disabled (not can-invite?)
+                                          :data-testid "invite-member"}
+                              (tr "dashboard.invite-profile")])]
           (if can-invite?
             invite-button
-            [:> tooltip* {:content title-text
+            [:> tooltip* {:content (tr "dashboard.invite-profile-disabled")
                           :id "invite-member-disabled-tooltip"
                           :tab-index 0}
              invite-button])))]]))
