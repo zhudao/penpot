@@ -21,17 +21,56 @@ use skia_safe::{
     Contains,
 };
 
+use std::borrow::Cow;
 use std::cell::Cell;
 use std::collections::HashSet;
+use std::rc::Rc;
 
 use super::FontFamily;
 use crate::math::Point;
-use crate::shapes::{self, merge_fills, Shape, VerticalAlign};
+use crate::shapes::{self, merge_fills, Shape, Type, VerticalAlign};
 use crate::utils::{get_fallback_fonts, get_font_collection};
 use crate::Uuid;
 
 // TODO: maybe move this to the wasm module?
 pub type ParagraphBuilderGroup = Vec<ParagraphBuilder>;
+
+/// True when the modifier changes the text layout container (resize), as opposed
+/// to rotation/move where glyph layout can be reused.
+pub fn modifier_changes_text_layout(base: &Shape, modifier: &Matrix) -> bool {
+    let Type::Text(text_content) = &base.shape_type else {
+        return false;
+    };
+    let before = oriented_container_bounds(base);
+    let after = before.transform(modifier);
+    match text_content.grow_type() {
+        GrowType::AutoWidth => !crate::math::is_close_to(before.height(), after.height()),
+        GrowType::AutoHeight | GrowType::Fixed => {
+            !crate::math::is_close_to(before.width(), after.width())
+        }
+    }
+}
+
+fn oriented_container_bounds(shape: &Shape) -> Bounds {
+    let selrect = shape.selrect();
+    let mut bounds = Bounds::new(
+        Point::new(selrect.x(), selrect.y()),
+        Point::new(selrect.x() + selrect.width(), selrect.y()),
+        Point::new(
+            selrect.x() + selrect.width(),
+            selrect.y() + selrect.height(),
+        ),
+        Point::new(selrect.x(), selrect.y() + selrect.height()),
+    );
+    if !shape.transform.is_identity() {
+        let mut matrix = shape.transform;
+        let center = shape.center();
+        matrix.post_translate(center);
+        matrix.pre_translate(-center);
+        bounds.transform_mut(&matrix);
+    }
+    bounds
+}
 
 #[repr(u8)]
 #[derive(Debug, PartialEq, Clone, Copy, ToJs)]
@@ -196,7 +235,9 @@ struct CachedExtrect {
 #[derive(Debug)]
 pub struct TextContentLayout {
     pub paragraph_builders: Vec<ParagraphBuilderGroup>,
-    pub paragraphs: Vec<Vec<skia::textlayout::Paragraph>>,
+    /// Shared across shape clones (e.g. modifier transforms) so rotation/pan
+    /// can paint without rebuilding Skia layout. Cleared builders on clone are OK.
+    pub paragraphs: Rc<Vec<Vec<skia::textlayout::Paragraph>>>,
     cached_extrect: Cell<Option<CachedExtrect>>,
 }
 
@@ -210,8 +251,8 @@ impl Clone for TextContentLayout {
     fn clone(&self) -> Self {
         Self {
             paragraph_builders: vec![],
-            paragraphs: vec![],
-            cached_extrect: Cell::new(None),
+            paragraphs: Rc::clone(&self.paragraphs),
+            cached_extrect: Cell::new(self.cached_extrect.get()),
         }
     }
 }
@@ -226,7 +267,7 @@ impl TextContentLayout {
     pub fn new() -> Self {
         Self {
             paragraph_builders: vec![],
-            paragraphs: vec![],
+            paragraphs: Rc::new(Vec::new()),
             cached_extrect: Cell::new(None),
         }
     }
@@ -237,12 +278,18 @@ impl TextContentLayout {
         paragraphs: Vec<Vec<skia::textlayout::Paragraph>>,
     ) {
         self.paragraph_builders = paragraph_builders;
-        self.paragraphs = paragraphs;
+        self.paragraphs = Rc::new(paragraphs);
+        self.cached_extrect.set(None);
+    }
+
+    pub fn clear(&mut self) {
+        self.paragraph_builders.clear();
+        self.paragraphs = Rc::new(Vec::new());
         self.cached_extrect.set(None);
     }
 
     pub fn needs_update(&self) -> bool {
-        self.paragraph_builders.is_empty() || self.paragraphs.is_empty()
+        self.paragraphs.is_empty()
     }
 }
 
@@ -390,6 +437,20 @@ impl TextContent {
         self.bounds
     }
 
+    /// Text content for paint when [`Rect`] size may differ from stored bounds
+    /// (e.g. modifier transform). Reuses `self` when width/height match; otherwise
+    /// clones paragraphs into a rebound copy with an empty layout cache.
+    pub fn paint_content_for_selrect<'a>(&'a self, selrect: Rect) -> Cow<'a, Self> {
+        let stored_bounds = self.bounds();
+        if (stored_bounds.width() - selrect.width()).abs() < 0.01
+            && (stored_bounds.height() - selrect.height()).abs() < 0.01
+        {
+            Cow::Borrowed(self)
+        } else {
+            Cow::Owned(self.new_bounds(selrect))
+        }
+    }
+
     pub fn set_xywh(&mut self, x: f32, y: f32, w: f32, h: f32) {
         self.bounds = Rect::from_xywh(x, y, w, h);
     }
@@ -471,7 +532,7 @@ impl TextContent {
         let mut has_lines = false;
         let mut y_accum = base_y + vertical_offset;
 
-        for group in paragraphs {
+        for group in paragraphs.iter() {
             if let Some(paragraph) = group.first() {
                 let line_metrics = paragraph.get_line_metrics();
                 for line in &line_metrics {
@@ -707,13 +768,32 @@ impl TextContent {
         &self,
         use_shadow: Option<bool>,
     ) -> Vec<ParagraphBuilderGroup> {
-        self.paragraph_builders(use_shadow, false, None)
+        self.paragraph_builders(use_shadow, false, None, None)
     }
 
     /// Creates paragraph builders with always-opaque paint (BLACK @ alpha 255).
     /// Used as a clip mask for inner stroke rendering.
     pub fn paragraph_builder_group_opaque(&self) -> Vec<ParagraphBuilderGroup> {
-        self.paragraph_builders(None, true, None)
+        self.paragraph_builders(None, true, None, None)
+    }
+
+    /// Maximum number of stacked fills across every span in this text block.
+    pub fn max_fill_layers(&self) -> usize {
+        self.paragraphs()
+            .iter()
+            .flat_map(|p| p.children())
+            .map(|s| s.fills.len())
+            .max()
+            .unwrap_or(0)
+    }
+
+    /// Builds paragraph builders that paint a single fill layer per span for SVG
+    /// export. `layer_from_bottom` is 0 for the bottommost fill (fills[last]).
+    pub fn paragraph_builder_group_for_fill_layer(
+        &self,
+        layer_from_bottom: usize,
+    ) -> Vec<ParagraphBuilderGroup> {
+        self.paragraph_builders(None, false, None, Some(layer_from_bottom))
     }
 
     fn paragraph_builders(
@@ -721,6 +801,7 @@ impl TextContent {
         use_shadow: Option<bool>,
         opaque: bool,
         align_override: Option<skia::textlayout::TextAlign>,
+        fill_layer: Option<usize>,
     ) -> Vec<ParagraphBuilderGroup> {
         let fonts = get_font_collection();
         let fallback_fonts = get_fallback_fonts();
@@ -736,11 +817,12 @@ impl TextContent {
             for span in paragraph.children() {
                 let remove_alpha =
                     opaque || (use_shadow.unwrap_or(false) && !span.is_transparent());
-                let text_style = span.to_style(
+                let text_style = span.to_style_with_paint(
                     &self.bounds(),
                     fallback_fonts,
                     remove_alpha,
                     paragraph.line_height(),
+                    fill_layer,
                 );
                 let text: String = span.apply_text_transform();
                 if !text.is_empty() {
@@ -762,7 +844,7 @@ impl TextContent {
     fn text_layout_auto_width(&self) -> TextContentLayoutResult {
         // Left-aligned MAX-width pass: longest_line() is glyph width, not the huge container.
         let mut measure_builders =
-            self.paragraph_builders(None, false, Some(skia::textlayout::TextAlign::Left));
+            self.paragraph_builders(None, false, Some(skia::textlayout::TextAlign::Left), None);
 
         let normalized_line_height =
             calculate_normalized_line_height(&mut measure_builders, f32::MAX);
@@ -869,6 +951,41 @@ impl TextContent {
 
     pub fn needs_update_layout(&self) -> bool {
         self.layout.needs_update()
+    }
+
+    /// True when cached Skia paragraphs can be painted as-is (no rebuild/layout).
+    pub fn has_usable_paint_layout(&self, shape: &Shape) -> bool {
+        if self.layout.needs_update() || self.layout_version != self.content_version {
+            return false;
+        }
+        self.layout_matches_paint_container(shape)
+    }
+
+    pub(crate) fn layout_cache_versions_match(&self) -> bool {
+        !self.layout.needs_update() && self.layout_version == self.content_version
+    }
+
+    pub(crate) fn layout_matches_paint_container(&self, shape: &Shape) -> bool {
+        if self.grow_type() == GrowType::AutoWidth {
+            return true;
+        }
+        let Some(layout_w) = self.layout_width else {
+            return false;
+        };
+        let container_w = self.get_width(shape.selrect().width());
+        (layout_w - container_w).abs() < f32::EPSILON
+    }
+
+    /// True when any span requests underline/overline/line-through (custom draw path).
+    pub fn has_text_decorations(&self) -> bool {
+        self.paragraphs().iter().any(|paragraph| {
+            paragraph.children().iter().any(|span| {
+                matches!(
+                    span.text_decoration,
+                    Some(d) if d != skia::textlayout::TextDecoration::NO_DECORATION
+                )
+            })
+        })
     }
 
     pub fn set_layout_from_result(
@@ -1349,15 +1466,41 @@ impl TextSpan {
         remove_alpha: bool,
         paragraph_line_height: f32,
     ) -> skia::textlayout::TextStyle {
-        let mut style = skia::textlayout::TextStyle::default();
-        let mut paint = paint::Paint::default();
+        self.to_style_with_paint(
+            content_bounds,
+            fallback_fonts,
+            remove_alpha,
+            paragraph_line_height,
+            None,
+        )
+    }
 
-        if remove_alpha {
+    fn to_style_with_paint(
+        &self,
+        content_bounds: &Rect,
+        fallback_fonts: &HashSet<String>,
+        remove_alpha: bool,
+        paragraph_line_height: f32,
+        fill_layer_from_bottom: Option<usize>,
+    ) -> skia::textlayout::TextStyle {
+        let mut style = skia::textlayout::TextStyle::default();
+        let paint = if remove_alpha {
+            let mut paint = paint::Paint::default();
             paint.set_color(skia::Color::BLACK);
             paint.set_alpha(255);
+            paint
+        } else if let Some(layer) = fill_layer_from_bottom {
+            if layer < self.fills.len() {
+                let fill_idx = self.fills.len() - 1 - layer;
+                self.fills[fill_idx].to_paint(content_bounds, true)
+            } else {
+                let mut paint = paint::Paint::default();
+                paint.set_color(skia::Color::TRANSPARENT);
+                paint
+            }
         } else {
-            paint = merge_fills(&self.fills, *content_bounds);
-        }
+            merge_fills(&self.fills, *content_bounds)
+        };
 
         let max_line_height = f32::max(paragraph_line_height, self.line_height);
         style.set_height(max_line_height);
@@ -1870,5 +2013,131 @@ mod tests {
         assert_eq!(para.char_utf16_len_at(0), 1);
         assert_eq!(para.char_utf16_len_at(1), 2);
         assert_eq!(para.char_utf16_len_at(2), 1);
+    }
+
+    fn sample_text_content() -> TextContent {
+        let bounds = Rect::from_xywh(0.0, 0.0, 200.0, 100.0);
+        let mut content = TextContent::new(bounds, GrowType::Fixed);
+        content.add_paragraph(test_paragraph(&["hello"]));
+        content
+    }
+
+    #[test]
+    fn has_usable_paint_layout_false_when_paragraphs_empty() {
+        let content = TextContent::new(Rect::from_xywh(0.0, 0.0, 100.0, 50.0), GrowType::Fixed);
+        let shape = Shape::new(Uuid::nil());
+        assert!(!content.has_usable_paint_layout(&shape));
+    }
+
+    #[test]
+    fn has_usable_paint_layout_false_when_versions_mismatch() {
+        let mut content = sample_text_content();
+        content.layout.paragraphs = Rc::new(vec![vec![]]);
+        content.layout_width = Some(200.0);
+        content.layout_version = 1;
+        content.content_version = 2;
+        let mut shape = Shape::new(Uuid::nil());
+        shape.set_selrect(0.0, 0.0, 200.0, 100.0);
+        assert!(!content.has_usable_paint_layout(&shape));
+    }
+
+    #[test]
+    fn has_usable_paint_layout_true_when_cached_and_versions_match() {
+        let mut content = sample_text_content();
+        content.layout.paragraphs = Rc::new(vec![vec![]]);
+        content.layout_width = Some(200.0);
+        content.layout_version = 3;
+        content.content_version = 3;
+        let mut shape = Shape::new(Uuid::nil());
+        shape.set_selrect(0.0, 0.0, 200.0, 100.0);
+        assert!(content.has_usable_paint_layout(&shape));
+    }
+
+    #[test]
+    fn has_usable_paint_layout_false_when_selrect_width_changed() {
+        let mut content = sample_text_content();
+        content.layout.paragraphs = Rc::new(vec![vec![]]);
+        content.layout_width = Some(200.0);
+        content.layout_version = 3;
+        content.content_version = 3;
+        let mut shape = Shape::new(Uuid::nil());
+        shape.set_selrect(0.0, 0.0, 300.0, 100.0);
+        assert!(!content.has_usable_paint_layout(&shape));
+    }
+
+    fn text_shape_with_cached_layout(content: TextContent) -> Shape {
+        let mut shape = Shape::new(Uuid::nil());
+        shape.set_shape_type(shapes::Type::Text(content));
+        shape.set_selrect(0.0, 0.0, 200.0, 100.0);
+        shape
+    }
+
+    #[test]
+    fn has_usable_paint_layout_false_when_rotated_and_resized() {
+        let mut content = sample_text_content();
+        content.layout.paragraphs = Rc::new(vec![vec![]]);
+        content.layout_width = Some(200.0);
+        content.layout_version = 3;
+        content.content_version = 3;
+        let base_shape = text_shape_with_cached_layout(content);
+        let rotate = Matrix::rotate_deg(45.0);
+        let resize = Matrix::scale((1.5, 1.0));
+        let mut modifier = rotate;
+        modifier.pre_concat(&resize);
+        assert!(modifier_changes_text_layout(&base_shape, &modifier));
+    }
+
+    #[test]
+    fn has_text_decorations_detects_underline() {
+        let mut content = sample_text_content();
+        content.paragraphs_mut()[0].children_mut()[0].text_decoration =
+            Some(skia::textlayout::TextDecoration::UNDERLINE);
+        assert!(content.has_text_decorations());
+    }
+
+    #[test]
+    fn has_text_decorations_false_for_plain_text() {
+        let content = sample_text_content();
+        assert!(!content.has_text_decorations());
+    }
+
+    #[test]
+    fn paint_content_for_selrect_borrows_when_bounds_match() {
+        let content = sample_text_content();
+        let selrect = Rect::from_xywh(10.0, 20.0, 200.0, 100.0);
+        match content.paint_content_for_selrect(selrect) {
+            Cow::Borrowed(_) => {}
+            Cow::Owned(_) => panic!("expected borrowed content"),
+        }
+    }
+
+    #[test]
+    fn paint_content_for_selrect_rebounds_when_size_differs() {
+        let content = sample_text_content();
+        let selrect = Rect::from_xywh(0.0, 0.0, 300.0, 100.0);
+        match content.paint_content_for_selrect(selrect) {
+            Cow::Owned(rebound) => {
+                assert_eq!(rebound.bounds().width(), 300.0);
+                assert!(rebound.layout.needs_update());
+            }
+            Cow::Borrowed(_) => panic!("expected rebound content"),
+        }
+    }
+
+    #[test]
+    fn layout_clone_shares_skia_paragraphs() {
+        let mut layout = TextContentLayout::new();
+        layout.paragraphs = Rc::new(vec![vec![]]);
+        let cloned = layout.clone();
+        assert!(Rc::ptr_eq(&layout.paragraphs, &cloned.paragraphs));
+        assert!(cloned.paragraph_builders.is_empty());
+    }
+
+    #[test]
+    fn layout_clear_empties_paragraphs() {
+        let mut layout = TextContentLayout::new();
+        layout.paragraphs = Rc::new(vec![vec![]]);
+        layout.clear();
+        assert!(layout.needs_update());
     }
 }
