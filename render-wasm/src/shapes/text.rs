@@ -90,6 +90,11 @@ pub struct TextContentSize {
 
 const DEFAULT_TEXT_CONTENT_SIZE: f32 = 0.01;
 
+/// Matches `marginRight: "1px"` on `.paragraph-set` in the HTML text renderer
+/// (`frontend/src/app/main/ui/shapes/text/styles.cljs`). DOM `getBoundingClientRect`
+/// includes that margin in auto-width measurements; Skia `longest_line()` does not.
+const PARAGRAPH_SET_MARGIN_RIGHT: f32 = 1.0;
+
 impl TextContentSize {
     pub fn default() -> Self {
         Self {
@@ -480,9 +485,17 @@ impl TextContent {
         seen
     }
 
-    pub fn add_paragraph(&mut self, paragraph: Paragraph) {
+    pub fn add_paragraph(&mut self, mut paragraph: Paragraph) {
+        let index = self.paragraphs.len() as u32;
+        paragraph.set_span_positions(index);
         self.paragraphs.push(paragraph);
         self.content_version = self.content_version.wrapping_add(1);
+    }
+
+    pub fn reset_span_positions(&mut self) {
+        for (index, paragraph) in self.paragraphs.iter_mut().enumerate() {
+            paragraph.set_span_positions(index as u32);
+        }
     }
 
     pub fn paragraphs(&self) -> &[Paragraph] {
@@ -593,7 +606,11 @@ impl TextContent {
             return self.content_rect(selrect, valign);
         }
 
-        let tight = if !self.layout.paragraphs.is_empty() {
+        let layout_matches_container = self
+            .layout_width
+            .is_some_and(|w| w.ceil() == self.get_width(selrect.width()).ceil());
+
+        let tight = if !self.layout.paragraphs.is_empty() && layout_matches_container {
             self.rect_from_paragraphs(selrect, valign)
         } else {
             let mut text_content = self.clone();
@@ -863,7 +880,7 @@ impl TextContent {
         let measure_paragraphs =
             build_paragraphs_from_paragraph_builders(&mut measure_builders, f32::MAX);
 
-        let width = measure_paragraphs
+        let content_width = measure_paragraphs
             .iter()
             .flatten()
             .fold(0.0_f32, |auto_width, paragraph| {
@@ -871,9 +888,10 @@ impl TextContent {
             })
             .ceil();
 
-        // Re-layout at that width with the real alignment.
+        // Re-layout at the intrinsic width (without the HTML margin slack).
         let mut paragraph_builders = self.paragraph_builder_group_from_text(None);
-        let paragraphs = build_paragraphs_from_paragraph_builders(&mut paragraph_builders, width);
+        let paragraphs =
+            build_paragraphs_from_paragraph_builders(&mut paragraph_builders, content_width);
         let height = paragraphs
             .iter()
             .flatten()
@@ -881,10 +899,11 @@ impl TextContent {
                 auto_height + paragraph.height()
             });
 
+        let reported_width = content_width + PARAGRAPH_SET_MARGIN_RIGHT;
         let size = TextContentSize::new_with_normalized_line_height(
-            width,
+            reported_width,
             height.ceil(),
-            width,
+            reported_width,
             normalized_line_height,
         );
         TextContentLayoutResult(paragraph_builders, paragraphs, size)
@@ -1269,6 +1288,12 @@ impl Paragraph {
         &mut self.children
     }
 
+    fn set_span_positions(&mut self, index: u32) {
+        for (span_index, span) in self.children.iter_mut().enumerate() {
+            span.set_position(index, span_index as u32);
+        }
+    }
+
     fn char_count(&self) -> usize {
         self.children
             .iter()
@@ -1434,6 +1459,8 @@ pub struct TextSpan {
     pub text_transform: Option<TextTransform>,
     pub text_direction: TextDirection,
     pub fills: Vec<shapes::Fill>,
+    pub paragraph_position: u32,
+    pub span_position: u32,
 }
 
 impl TextSpan {
@@ -1463,11 +1490,18 @@ impl TextSpan {
             font_weight,
             font_variant_id,
             fills,
+            paragraph_position: u32::MAX,
+            span_position: u32::MAX,
         }
     }
 
     pub fn set_text(&mut self, text: String) {
         self.text = text;
+    }
+
+    pub fn set_position(&mut self, paragraph: u32, span: u32) {
+        self.paragraph_position = paragraph;
+        self.span_position = span;
     }
 
     pub fn to_style(

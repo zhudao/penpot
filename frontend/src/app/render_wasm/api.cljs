@@ -397,11 +397,6 @@
   (or (= wasm/internal-frame-type FRAME_TYPE_PARTIAL)
       (= wasm/internal-frame-type FRAME_TYPE_VIEWPORT_READY)))
 
-(defn- frame-presented-target?
-  "True when this frame recomposited Target (full or early viewport present)."
-  []
-  (not= wasm/internal-frame-type FRAME_TYPE_PARTIAL))
-
 (def ^:const RENDER-FLAG-SYNC-TILES 4) ;; Rebuild tile index without ending fast mode (pan/zoom pause).
 
 (defn- internal-render
@@ -507,18 +502,8 @@
     (try
       (when (is-text-editor-wasm-enabled @st/state)
         (text-editor/text-editor-update-blink timestamp)
-        ;; Only repaint the overlay when this frame recomposited Target (a full
-        ;; frame or early viewport present). A partial frame is flushed but not
-        ;; presented - Target still shows the last presented frame with the
-        ;; overlay already on it - so repainting the translucent selection over
-        ;; it stacks another layer every progressive frame: it darkens, then
-        ;; snaps back when the final frame presents from the clean Backbuffer
-        ;; (the blink at the end of a zoom over a selection, gh-10709).
-        (when (frame-presented-target?)
-          (text-editor/text-editor-render-overlay))
-        ;; Drain editor events. Only content/layout changes need a full shape
-        ;; re-render; selection/style changes are already reflected by the
-        ;; overlay redrawn just above.
+        ;; The editor overlay is painted by the WASM frame composition; only
+        ;; content/layout changes need a full shape re-render here.
         (when (drain-text-editor-events!)
           (request-render-preserving-target "text-editor-content")))
       (catch :default e
@@ -1421,28 +1406,6 @@
   (let [local (get @st/state :workspace-local)]
     (or (:panning local) (:zooming local))))
 
-(defn- render-text-editor-overlay-if-active!
-  "Redraw the editor caret/selection straight onto the current Target frame when
-   an editor is active (no-op otherwise). Used after the direct `_render_from_cache`
-   / `internal-render` calls of a view interaction, which bypass the rAF `render`
-   loop that normally repaints the overlay. Without it the selection blinks out
-   for the duration of a pan/zoom gesture over a text shape (gh-10709)."
-  []
-  (when (is-text-editor-wasm-enabled @st/state)
-    (text-editor/text-editor-render-overlay)))
-
-(defn- render-text-editor-overlay-after-frame!
-  "Repaint the overlay after a direct `internal-render`, but only when that
-   render recomposited Target (a full frame or early viewport present). A partial
-   frame is only flushed - Target keeps the last presented frame with the overlay
-   already on it - so repainting the translucent selection then stacks another
-   layer and it visibly darkens across the progressive frames before snapping
-   back on the final present (the blink at the end of a zoom over a selection,
-   gh-10709). The final full frame's own repaint keeps the overlay in place."
-  []
-  (when (frame-presented-target?)
-    (render-text-editor-overlay-if-active!)))
-
 (defn finalize-view-interaction!
   "Ends an in-progress pan/zoom view interaction and triggers a full-quality
    render. No-ops when no view interaction is active.
@@ -1461,12 +1424,7 @@
     ;; this implicitly (`zoom_changed`); this extends it to pan/resize-triggered
     ;; ends (e.g. selecting a shape opens the options panel and resizes the
     ;; viewport), which previously blanked.
-    (internal-render (js/performance.now) RENDER-FLAG-SYNC-TILES)
-    ;; The direct render above bypasses the rAF `render` loop, so repaint the
-    ;; editor overlay explicitly. Only when this was a full frame: a progressive
-    ;; render keeps painting through the rAF loop and its partial frames must not
-    ;; be over-stamped (see `render-text-editor-overlay-after-frame!`).
-    (render-text-editor-overlay-after-frame!)))
+    (internal-render (js/performance.now) RENDER-FLAG-SYNC-TILES)))
 
 (def render-finish
   (letfn [(do-render []
@@ -1475,9 +1433,7 @@
             (when (initialized?)
               (if (view-gesture-active?)
                 ;; Pan/zoom pause: render without ending the interaction.
-                (do
-                  (internal-render (js/performance.now) RENDER-FLAG-SYNC-TILES)
-                  (render-text-editor-overlay-after-frame!))
+                (internal-render (js/performance.now) RENDER-FLAG-SYNC-TILES)
                 (finalize-view-interaction!))))]
     (fns/debounce do-render DEBOUNCE_DELAY_MS)))
 
@@ -1495,15 +1451,6 @@
 
       (perf/begin-measure "render-from-cache")
       (h/call wasm/internal-module "_render_from_cache" 0)
-      ;; Keep the text-editor caret/selection glued to the shapes while the view
-      ;; changes. `_render_from_cache` re-composites shapes + UI at the new viewbox
-      ;; but omits the editor overlay, so without this the selection would vanish for
-      ;; the whole pan/zoom gesture and only flash back when the debounced full
-      ;; render lands — the blink seen when zooming in/out over a selection at high
-      ;; zoom (gh-10709). `_text_editor_render_overlay` draws straight onto the
-      ;; freshly composited Target (no Backbuffer re-compose) and no-ops when no
-      ;; editor is active.
-      (render-text-editor-overlay-if-active!)
       (render-finish)
       (perf/end-measure "render-from-cache"))))
 
@@ -1522,6 +1469,60 @@
   tc/default-text-content so the renderer receives typography information."
   [content]
   (or content (tc/v2-default-text-content)))
+
+(def ^:private empty-text-font-state
+  {:font-index {} :pending-faces #{}})
+
+(defn- text-layout-fonts
+  "Content and fallback faces (emoji, Noto, ...) that `set-shape-text-content`
+  uploads, must match that path for pending-face tracking."
+  [content]
+  (into #{} (concat (f/get-content-fonts content)
+                    (fonts-from-text-content content false))))
+
+(defn- text-font-face-keys-state
+  "All font-face keys for a text content, and the subset not WASM-ready yet."
+  [content]
+  (reduce
+   (fn [acc font]
+     (let [font-data (f/make-font-data font)
+           key       (f/font-data-key font-data)
+           pending?  (not (f/font-ready? font-data))]
+       (-> acc
+           (update :font-face-keys conj key)
+           (cond-> pending?
+             (update :pending-font-face-keys conj key)))))
+   {:font-face-keys #{} :pending-font-face-keys #{}}
+   (text-layout-fonts content)))
+
+(defn- acc-text-font-state
+  [{:keys [font-index pending-faces]} id font-face-keys pending-font-face-keys]
+  {:font-index (reduce (fn [idx face]
+                         (update idx face (fnil conj #{}) id))
+                       font-index
+                       (or font-face-keys #{}))
+   :pending-faces (into (or pending-faces #{})
+                        (or pending-font-face-keys #{}))})
+
+(defn text-font-state-for-shape
+  "Build the font-face index for a single text shape (incremental updates)."
+  [shape]
+  (if (cfh/text-shape? shape)
+    (let [content (ensure-text-content (:content shape))
+          {:keys [font-face-keys pending-font-face-keys]}
+          (text-font-face-keys-state content)]
+      (acc-text-font-state empty-text-font-state
+                           (:id shape)
+                           font-face-keys
+                           pending-font-face-keys))
+    empty-text-font-state))
+
+(defn- shape-ids-for-pending-fonts
+  [{:keys [font-index pending-faces]}]
+  (when (seq pending-faces)
+    (into #{}
+          (mapcat #(get font-index % []))
+          pending-faces)))
 
 (defn- set-object-host-attrs
   "Host-specific attrs after structural upload (text/svg-raw/grid; optionally
@@ -1562,6 +1563,8 @@
           (set-layout-data shape)))
 
     (let [is-text? (= type :text)
+          {:keys [font-face-keys pending-font-face-keys]}
+          (when is-text? (text-font-face-keys-state content))
           text-content-pending (when is-text? (set-shape-text-content id content))
           pending-thumbnails (into [] (concat
                                        text-content-pending
@@ -1574,12 +1577,13 @@
                                  (set-shape-strokes id strokes false write-fills-strokes?)))]
       {:thumbnails pending-thumbnails
        :full pending-full
-       :font-pending-ids (if (some :callback text-content-pending) [id] [])})))
+       :font-face-keys (or font-face-keys #{})
+       :pending-font-face-keys (or pending-font-face-keys #{})})))
 
 (defn set-object
   [shape]
   (if-not (and shape (wasm/live?))
-    {:thumbnails [] :full [] :font-pending-ids []}
+    {:thumbnails [] :full [] :font-face-keys #{} :pending-font-face-keys #{}}
     (do
       (perf/begin-measure "set-object")
       (let [shape (svg-filters/apply-svg-derived shape)]
@@ -1587,6 +1591,7 @@
         (let [result (set-object-host-attrs shape false)]
           (perf/end-measure "set-object")
           result)))))
+
 (defn- update-text-layouts
   "Synchronously update text layouts for all shapes and send rect updates
    to the worker index."
@@ -1611,6 +1616,29 @@
       :auto-height (not (mth/close? height (:height selrect) 0.1))
       false)))
 
+(defonce ^:private pending-stale-selrect-ids (atom #{}))
+(defonce ^:private stale-selrect-sync-token (atom 0))
+
+(defn- flush-stale-selrect-sync!
+  []
+  (when-let [ids (seq (first (reset-vals! pending-stale-selrect-ids #{})))]
+    (st/emit! (ptk/data-event ::stale-text-selrects {:ids (vec ids)}))))
+
+(defn- schedule-stale-selrect-sync!
+  "Coalesce stale-selrect emissions and defer until the first viewport tile
+   pass completes, then run on idle so page load can paint first."
+  [stale-ids]
+  (swap! pending-stale-selrect-ids into stale-ids)
+  (let [token (swap! stale-selrect-sync-token inc)
+        flush-on-idle!
+        (fn []
+          (when (= token @stale-selrect-sync-token)
+            (timers/schedule-on-idle
+             (fn []
+               (when (= token @stale-selrect-sync-token)
+                 (flush-stale-selrect-sync!))))))]
+    (listen-tiles-render-complete-once! flush-on-idle!)))
+
 (defn- sync-stale-text-selrects!
   "Emit the ids of auto-grow text shapes whose selrect no longer matches the
    measured layout, so the workspace resizes them (data-event instead of a
@@ -1624,24 +1652,26 @@
                               (map :id))
                         shapes)]
     (when (seq stale-ids)
-      (st/emit! (ptk/data-event ::stale-text-selrects {:ids stale-ids})))))
+      (schedule-stale-selrect-sync! stale-ids))))
 
 (defn- relayout-after-fonts!
   "Relayout text shapes once their pending fonts have resolved. Font fetches
-   are deduped per URL and storing a font does not invalidate cached layouts,
-   so every text shape (not only the fetch triggers in `font-pending-ids`)
-   needs a forced relayout; then re-sync selrects that drifted."
-  [shapes font-pending-ids]
-  (let [text-ids (into [] (comp (filter cfh/text-shape?) (map :id)) shapes)]
+   are deduped per URL, so only shapes that use a not-yet-ready face at upload
+   time need a forced relayout; then re-sync selrects that drifted for those
+   shapes only."
+  [shapes text-font-state]
+  (let [text-ids (into [] (comp (filter cfh/text-shape?) (map :id)) shapes)
+        affected-ids (or (shape-ids-for-pending-fonts text-font-state) #{})
+        shapes-by-id (d/index-by :id shapes)]
     (when (seq text-ids)
-      (if (seq font-pending-ids)
-        (do
-          (force-update-text-layouts text-ids)
-          (sync-stale-text-selrects! shapes))
+      (if (seq affected-ids)
+        (let [affected-shapes (into [] (keep shapes-by-id) affected-ids)]
+          (force-update-text-layouts affected-ids)
+          (sync-stale-text-selrects! affected-shapes))
         (update-text-layouts text-ids)))))
 
 (defn process-pending
-  [shapes thumbnails full font-pending-ids on-complete]
+  [shapes thumbnails full text-font-state on-complete]
   (let [pending-thumbnails
         (d/index-by :key :callback thumbnails)
 
@@ -1664,18 +1694,24 @@
                  (rx/reduce conj [])
                  (rx/catch #(rx/empty))))
            (rx/subs!
-            (fn [_]
-              (relayout-after-fonts! shapes font-pending-ids)
-              (request-render "images-loaded"))
             noop-fn
-            (fn [] (when (fn? on-complete) (on-complete)))))
+            noop-fn
+            (fn []
+              (relayout-after-fonts! shapes text-font-state)
+              (request-render "images-loaded")
+              (when (fn? on-complete) (on-complete)))))
       ;; No pending images — complete immediately.
       (when on-complete (on-complete)))))
 
 (defn process-object
   [shape]
-  (let [{:keys [thumbnails full font-pending-ids]} (set-object shape)]
-    (process-pending [shape] thumbnails full font-pending-ids noop-fn)))
+  (let [{:keys [thumbnails full font-face-keys pending-font-face-keys]}
+        (set-object shape)
+        text-font-state (acc-text-font-state empty-text-font-state
+                                             (:id shape)
+                                             font-face-keys
+                                             pending-font-face-keys)]
+    (process-pending [shape] thumbnails full text-font-state noop-fn)))
 
 (defn process-objects
   "Like process-object but for multiple shapes at once. Accumulates all
@@ -1684,19 +1720,26 @@
    just the first shape that triggered the fetch."
   [shapes]
   (let [total-shapes (count shapes)
-        {:keys [thumbnails full font-pending-ids]}
-        (loop [index 0 thumbnails-acc (transient []) full-acc (transient []) font-acc (transient [])]
+        {:keys [thumbnails full text-font-state]}
+        (loop [index 0
+               thumbnails-acc (transient [])
+               full-acc (transient [])
+               font-state-acc empty-text-font-state]
           (if (< index total-shapes)
             (let [shape (nth shapes index)
-                  {:keys [thumbnails full font-pending-ids]} (set-object shape)]
+                  {:keys [thumbnails full font-face-keys pending-font-face-keys]}
+                  (set-object shape)]
               (recur (inc index)
                      (reduce conj! thumbnails-acc thumbnails)
                      (reduce conj! full-acc full)
-                     (reduce conj! font-acc font-pending-ids)))
+                     (acc-text-font-state font-state-acc
+                                          (:id shape)
+                                          font-face-keys
+                                          pending-font-face-keys)))
             {:thumbnails (persistent! thumbnails-acc)
              :full (persistent! full-acc)
-             :font-pending-ids (persistent! font-acc)}))]
-    (process-pending shapes thumbnails full font-pending-ids noop-fn)))
+             :text-font-state font-state-acc}))]
+    (process-pending shapes thumbnails full text-font-state noop-fn)))
 
 (def ^:private ^:const BATCH_MAX_SHAPES 512)
 
@@ -1706,8 +1749,8 @@
    Structural attrs are uploaded in one `_set_shapes_batch` FFI per chunk;
    host-specific attrs (fills/strokes/text/grid/path) stay per-shape.
 
-   Returns {:thumbnails [...] :full [...] :font-pending-ids [...] :next-index n}"
-  [shapes start-index thumbnails-acc full-acc font-pending-acc]
+   Returns {:thumbnails [...] :full [...] :text-font-state {...} :next-index n}"
+  [shapes start-index thumbnails-acc full-acc text-font-state-acc]
   (let [total     (count shapes)
         end-index (min total (+ start-index BATCH_MAX_SHAPES))
         chunk     (into [] (subvec (if (vector? shapes) shapes (vec shapes))
@@ -1734,17 +1777,20 @@
     (loop [xs prepared
            t-acc (transient thumbnails-acc)
            f-acc (transient full-acc)
-           fp-acc (transient font-pending-acc)]
+           font-state-acc text-font-state-acc]
       (if-let [shape (first xs)]
-        (let [{:keys [thumbnails full font-pending-ids]}
+        (let [{:keys [thumbnails full font-face-keys pending-font-face-keys]}
               (set-object-host-attrs shape true :skip-fills-strokes? true)]
           (recur (next xs)
                  (reduce conj! t-acc thumbnails)
                  (reduce conj! f-acc full)
-                 (reduce conj! fp-acc font-pending-ids)))
+                 (acc-text-font-state font-state-acc
+                                      (:id shape)
+                                      font-face-keys
+                                      pending-font-face-keys)))
         {:thumbnails (persistent! t-acc)
          :full (persistent! f-acc)
-         :font-pending-ids (persistent! fp-acc)
+         :text-font-state font-state-acc
          :next-index end-index}))))
 
 (defn- set-objects-async
@@ -1755,16 +1801,16 @@
   (let [total-shapes (count shapes)]
     (p/create
      (fn [resolve _reject]
-       (letfn [(process-next-chunk [index thumbnails-acc full-acc font-pending-acc]
+       (letfn [(process-next-chunk [index thumbnails-acc full-acc text-font-state-acc]
                  (if (< index total-shapes)
                    ;; Process one time-budgeted chunk
-                   (let [{:keys [thumbnails full font-pending-ids next-index]}
+                   (let [{:keys [thumbnails full text-font-state next-index]}
                          (process-shapes-chunk shapes index
-                                               thumbnails-acc full-acc font-pending-acc)]
+                                               thumbnails-acc full-acc text-font-state-acc)]
                      ;; Yield to browser, then continue with next chunk
                      (-> (yield-to-browser)
                          (p/then (fn [_]
-                                   (process-next-chunk next-index thumbnails full font-pending-ids)))))
+                                   (process-next-chunk next-index thumbnails full text-font-state)))))
                    ;; All chunks done - finalize
                    (do
                      (perf/end-measure "set-objects")
@@ -1815,12 +1861,12 @@
                                            (if (fn? callback) (callback) (rx/empty))))
                                         (rx/reduce conj [])))
                                   (rx/subs!
-                                   (fn [_]
-                                     (relayout-after-fonts! shapes font-pending-acc)
-                                     (request-render "images-loaded"))
                                    noop-fn
-                                   noop-fn)))))))))]
-         (process-next-chunk 0 [] [] []))))))
+                                   noop-fn
+                                   (fn []
+                                     (relayout-after-fonts! shapes text-font-state-acc)
+                                     (request-render "images-loaded")))))))))))]
+         (process-next-chunk 0 [] [] empty-text-font-state))))))
 
 
 ;; This is a version of process-pending that doesn't have sideffects
@@ -1887,22 +1933,25 @@
           (when (and (contains? #{:path :bool} type) (some? (get shape :content)))
             (props/set-shape-path-content (get shape :content))))))
     (let [total-shapes (count prepared)
-          {:keys [thumbnails full font-pending-ids]}
+          {:keys [thumbnails full text-font-state]}
           (loop [index 0
                  thumbnails-acc (transient [])
                  full-acc (transient [])
-                 font-acc (transient [])]
+                 font-state-acc empty-text-font-state]
             (if (< index total-shapes)
               (let [shape (nth prepared index)
-                    {:keys [thumbnails full font-pending-ids]}
+                    {:keys [thumbnails full font-face-keys pending-font-face-keys]}
                     (set-object-host-attrs shape true :skip-fills-strokes? true)]
                 (recur (inc index)
                        (reduce conj! thumbnails-acc thumbnails)
                        (reduce conj! full-acc full)
-                       (reduce conj! font-acc font-pending-ids)))
+                       (acc-text-font-state font-state-acc
+                                            (:id shape)
+                                            font-face-keys
+                                            pending-font-face-keys)))
               {:thumbnails (persistent! thumbnails-acc)
                :full (persistent! full-acc)
-               :font-pending-ids (persistent! font-acc)}))]
+               :text-font-state font-state-acc}))]
       (perf/end-measure "set-objects")
       (when on-shapes-ready (on-shapes-ready))
       (when (wasm/live?)
@@ -1910,7 +1959,7 @@
         ;; map to which tiles after a page switch.
         (h/call wasm/internal-module "_set_view_end")
         (reset! view-interaction-active? false)
-        (process-pending shapes thumbnails full font-pending-ids
+        (process-pending shapes thumbnails full text-font-state
                          (fn []
                            (if render-callback
                              (render-callback)
