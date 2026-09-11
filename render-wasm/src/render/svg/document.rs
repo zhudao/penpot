@@ -1,6 +1,6 @@
 use skia_safe::{self as skia, Paint};
 
-use crate::shapes::{Shape, Type};
+use crate::shapes::{radius_to_sigma, Shape, Type};
 use crate::state::ShapesPoolRef;
 
 use crate::render::vector::draw_shape_geometry;
@@ -136,16 +136,39 @@ impl SvgLayerCanvas {
     }
 
     /// Finalizes a fragment canvas as a `<clipPath>` def.
+    ///
+    /// Rewrite fill-rule to clip-rule: clipPaths ignore fill-rule, so evenodd
+    /// stroke rings would otherwise fill solid.
     pub(super) fn finish_clip_path_fragment(&mut self, id: &str, canvas: skia::svg::Canvas) {
         let data = canvas.end();
         let doc = String::from_utf8_lossy(data.as_bytes());
         let inner = extract_inner_svg(&doc);
         let prefix = format!("f{}_", self.frag_no);
         self.frag_no += 1;
-        let geometry = sanitize_skia_svg_fragment(&remap_ids(inner, &prefix));
+        let geometry = sanitize_skia_svg_fragment(&remap_ids(inner, &prefix))
+            .replace("fill-rule=", "clip-rule=");
         self.defs.push_str(&format!(
             "<clipPath id=\"{id}\" clipPathUnits=\"userSpaceOnUse\">{geometry}</clipPath>"
         ));
+    }
+
+    /// Registers a layer-blur `<filter>` and returns its id.
+    ///
+    /// `sigma` is Skia/canvas stdDeviation (`radius_to_sigma(value * scale)`).
+    /// Padding (±50%) avoids the default 10% objectBoundingBox clip on large blurs.
+    pub(super) fn push_layer_blur_filter(&mut self, sigma: f32) -> String {
+        let id = self.unique("blur");
+        self.defs.push_str(&format!(
+            concat!(
+                "<filter id=\"{id}\" x=\"-50%\" y=\"-50%\" width=\"200%\" height=\"200%\" ",
+                "color-interpolation-filters=\"sRGB\">",
+                "<feGaussianBlur stdDeviation=\"{sigma}\"/>",
+                "</filter>"
+            ),
+            id = id,
+            sigma = sigma
+        ));
+        id
     }
 }
 
@@ -167,11 +190,11 @@ fn draw_clip_geometry(cv: &skia::Canvas, shape: &Shape, tree: ShapesPoolRef, pai
 }
 
 /// Builds the `<g>` attribute string for a shape's composite effects (opacity,
-/// blend mode). Returns `None` when the shape needs no wrapper.
+/// blend mode, layer blur). Returns `None` when the shape needs no wrapper.
 ///
-/// Layer blur / shadows are intentionally omitted here — they need native SVG
-/// filter re-emission to survive `SkSVGDevice` and land in later PRs.
-pub(super) fn effect_attrs(element: &Shape) -> Option<String> {
+/// Layer blur is a native SVG `<filter>` (SkSVGDevice drops paint image-filters).
+/// Shadows still need dedicated re-emission in a later PR.
+pub(super) fn effect_attrs(builder: &mut SvgLayerCanvas, element: &Shape) -> Option<String> {
     let mut parts: Vec<String> = Vec::new();
 
     let opacity = element.opacity();
@@ -181,6 +204,13 @@ pub(super) fn effect_attrs(element: &Shape) -> Option<String> {
 
     if let Some(css) = blend_css(element.blend_mode().0) {
         parts.push(format!("style=\"mix-blend-mode:{css}\""));
+    }
+
+    if let Some(blur) = element.visible_layer_blur() {
+        // Match canvas `Shape::image_filter`: sigma from radius × export scale.
+        let sigma = radius_to_sigma(blur.value * builder.scale);
+        let id = builder.push_layer_blur_filter(sigma);
+        parts.push(format!("filter=\"url(#{id})\""));
     }
 
     if parts.is_empty() {
