@@ -49,6 +49,14 @@ export class RegisterPage extends BasePage {
       "verify-token",
       "register/verify-token-email-verified.json",
     );
+    // The settings step reloads the app via page.goto, which refetches
+    // get-profile on boot. Without this override the initial anonymous
+    // mock wins again and the app falls back to the login form instead
+    // of rendering settings.
+    await this.mockRPC(
+      "get-profile",
+      "register/get-profile-email-verified.json",
+    );
     await this.mockRPCs({
       "get-teams": "logged-in-user/get-teams-default.json",
       "get-font-variants?team-id=*":
@@ -70,7 +78,7 @@ export class RegisterPage extends BasePage {
   }
 
   async goToVerifyToken(token = "verify-email-token") {
-    await this.page.goto(`/#/auth/verify-token?token=${token}`);
+    await this.page.goto(`/?screen=auth-verify-token&token=${token}`);
   }
 
   static async init(page) {
