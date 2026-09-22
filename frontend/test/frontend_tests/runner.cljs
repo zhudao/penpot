@@ -35,6 +35,7 @@
    [frontend-tests.helpers-shapes-test]
    [frontend-tests.logic.comp-remove-swap-slots-test]
    [frontend-tests.logic.components-and-tokens]
+   [frontend-tests.logic.copy-paste-typography-test]
    [frontend-tests.logic.copying-and-duplicating-test]
    [frontend-tests.logic.frame-guides-test]
    [frontend-tests.logic.groups-test]
@@ -82,6 +83,7 @@
    [frontend-tests.tokens.logic.token-actions-test]
    [frontend-tests.tokens.logic.token-data-test]
    [frontend-tests.tokens.logic.token-remapping-test]
+   [frontend-tests.tokens.logic.tokens-status-test]
    [frontend-tests.tokens.style-dictionary-test]
    [frontend-tests.tokens.token-errors-test]
    [frontend-tests.tokens.workspace-tokens-remap-test]
@@ -93,6 +95,7 @@
    [frontend-tests.ui.gradient-handlers-test]
    [frontend-tests.ui.layout-container-multiple-test]
    [frontend-tests.ui.measures-menu-props-test]
+   [frontend-tests.ui.organization-team-switch-test]
    [frontend-tests.ui.routes-test]
    [frontend-tests.ui.settings-password-schema-test]
    [frontend-tests.ui.settings-shortcuts-test]
@@ -150,6 +153,7 @@
    'frontend-tests.helpers-shapes-test
    'frontend-tests.logic.comp-remove-swap-slots-test
    'frontend-tests.logic.components-and-tokens
+   'frontend-tests.logic.copy-paste-typography-test
    'frontend-tests.logic.copying-and-duplicating-test
    'frontend-tests.logic.frame-guides-test
    'frontend-tests.logic.groups-test
@@ -197,6 +201,7 @@
    'frontend-tests.tokens.logic.token-remapping-test
    'frontend-tests.tokens.style-dictionary-test
    'frontend-tests.tokens.token-errors-test
+   'frontend-tests.tokens.logic.tokens-status-test
    'frontend-tests.tokens.workspace-tokens-remap-test
    'frontend-tests.ui.check-updates-test
    'frontend-tests.ui.colorpicker-token-set-order-test
@@ -206,6 +211,7 @@
    'frontend-tests.ui.gradient-handlers-test
    'frontend-tests.ui.layout-container-multiple-test
    'frontend-tests.ui.measures-menu-props-test
+   'frontend-tests.ui.organization-team-switch-test
    'frontend-tests.ui.routes-test
    'frontend-tests.render-dimensions-test
    'frontend-tests.text-editor-paste-guard-test
