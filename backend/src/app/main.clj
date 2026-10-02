@@ -180,6 +180,12 @@
     ::mdef/labels ["route" "backend" "bucket" "result"]
     ::mdef/type :counter}
 
+   :storage-gc-poison
+   {::mdef/name "penpot_storage_gc_poison_total"
+    ::mdef/help "Storage objects deferred by storage-gc-touched because their metadata is corrupt."
+    ::mdef/labels []
+    ::mdef/type :counter}
+
    :http-server-dispatch-timing
    {::mdef/name "penpot_http_server_dispatch_timing"
     ::mdef/help "Histogram of dispatch handler"
@@ -271,7 +277,8 @@
     ::sto/storage  (ig/ref ::sto/storage)}
 
    ::sto.gc-touched/handler
-   {::db/pool (ig/ref ::db/pool)}
+   {::db/pool      (ig/ref ::db/pool)
+    ::mtx/metrics  (ig/ref ::mtx/metrics)}
 
    ::sto.pending-gc/handler
    {::db/pool     (ig/ref ::db/pool)
@@ -372,11 +379,12 @@
     ::setup/props     (ig/ref ::setup/props)}
 
    ::http.ws/routes
-   {::db/pool         (ig/ref ::db/pool)
-    ::mtx/metrics     (ig/ref ::mtx/metrics)
-    ::mbus/msgbus     (ig/ref ::mbus/msgbus)
-    ::setup/props     (ig/ref ::setup/props)
-    ::session/manager (ig/ref ::session/manager)}
+   {::db/pool           (ig/ref ::db/pool)
+    ::mtx/metrics       (ig/ref ::mtx/metrics)
+    ::mbus/msgbus       (ig/ref ::mbus/msgbus)
+    ::setup/props       (ig/ref ::setup/props)
+    ::session/manager   (ig/ref ::session/manager)
+    :app.nitrate/client (ig/ref :app.nitrate/client)}
 
    :app.http.assets/routes
    {::http.assets/path              (cf/get :assets-path)
@@ -568,7 +576,8 @@
    :app.loggers.audit.archive-task/handler
    {::setup/shared-keys  (ig/ref ::setup/shared-keys)
     ::http.client/client (ig/ref ::http.client/client)
-    ::db/pool            (ig/ref ::db/pool)}
+    ::db/pool            (ig/ref ::db/pool)
+    :app.nitrate/client  (ig/ref :app.nitrate/client)}
 
    :app.loggers.audit.gc-task/handler
    {::db/pool (ig/ref ::db/pool)}
@@ -647,11 +656,13 @@
      {:cron #penpot/cron "0 30 */3,23 * * ?"
       :task :telemetry}
 
-     (when (contains? cf/flags :audit-log-archive)
+     (when (or (contains? cf/flags :nexus)
+               (contains? cf/flags :admin-console))
        {:cron #penpot/cron "0 */5 * * * ?" ;; every 5m
         :task :audit-log-archive})
 
-     (when (contains? cf/flags :audit-log-gc)
+     (when (or (contains? cf/flags :nexus)
+               (contains? cf/flags :admin-console))
        {:cron #penpot/cron "30 */5 * * * ?" ;; every 5m
         :task :audit-log-gc})]}
 

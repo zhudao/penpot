@@ -61,7 +61,6 @@
    :objects-storage-fs-directory "assets"
 
    :auth-token-cookie-name "auth-token"
-   :auth-token-cookie-max-age-absolute (ct/duration {:days 30})
 
    :assets-path "/internal/assets/"
    :smtp-default-reply-to "Penpot <no-reply@example.com>"
@@ -165,6 +164,9 @@
     [:binfile-import-max-text-entry-size {:optional true} ::sm/int]
     [:binfile-import-max-text-total-size {:optional true} ::sm/int]
     [:binfile-import-max-zip-entries {:optional true} ::sm/int]
+
+    ;; Max serialized size of profile props in bytes (default 2 MiB)
+    [:profile-props-max-size {:optional true} ::sm/int]
 
     [:login-lockout-max-attempts {:optional true} ::sm/int]
     [:login-lockout-window {:optional true} ::ct/duration]
@@ -303,6 +305,10 @@
     [:objects-storage-s3-bucket {:optional true} :string]
     [:objects-storage-s3-region {:optional true} :keyword]
     [:objects-storage-s3-endpoint {:optional true} ::sm/uri]
+
+    ;; Write storage_object.metadata as plain JSON instead of
+    ;; Transit-JSON. Unset by default (Phase 1: keep writing Transit).
+    [:storage-metadata-as-json {:optional true} ::sm/boolean]
 
     ;; SSRF protection
     [:ssrf-allowed-hosts {:optional true} [::sm/set :string]]
