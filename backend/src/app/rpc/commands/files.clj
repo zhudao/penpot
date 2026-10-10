@@ -22,6 +22,7 @@
    [app.common.transit :as t]
    [app.common.types.components-list :as ctkl]
    [app.common.types.file :as ctf]
+   [app.common.types.plugins :as ctpg]
    [app.common.types.tokens-lib :as ctob]
    [app.common.uri :as uri]
    [app.config :as cf]
@@ -721,6 +722,53 @@
   (get-file-stats cfg id))
 
 
+;; --- COMMAND QUERY: get-file-plugin-data
+
+(def ^:private schema:get-file-plugin-data
+  [:map {:title "get-file-plugin-data"}
+   [:id ::sm/uuid]
+   [:namespace {:optional true} :keyword]])
+
+(sv/defmethod ::get-file-plugin-data
+  "Return the file-level plugin data: the arbitrary key/value metadata
+   stored on the file root through the Plugin API. Optionally narrowed
+   to a single `namespace`. Lets external tooling read metadata such as
+   issue or commit references without downloading the whole file."
+  {::doc/added "2.20"
+   ::sm/params schema:get-file-plugin-data
+   ::sm/result ctpg/schema:plugin-data
+   ::db/transaction true}
+  [{:keys [::db/conn] :as cfg} {:keys [::rpc/profile-id id namespace]}]
+  (check-read-permissions! conn profile-id id)
+  (let [plugin-data (-> (bfc/get-file cfg id)
+                        (get-in [:data :plugin-data]))]
+    (if namespace
+      (select-keys plugin-data [namespace])
+      (or plugin-data {}))))
+
+;; --- COMMAND QUERY: get-file-tokens
+
+(def ^:private schema:get-file-tokens
+  [:map {:title "get-file-tokens"}
+   [:file-id ::sm/uuid]])
+
+(sv/defmethod ::get-file-tokens
+  "Return the design tokens of a file as a DTCG document, or nil when
+   the file has none. Active themes and sets come from the file's
+   tokens status. Cheap alternative to `get-file` when only the tokens
+   are needed."
+  {::doc/added "2.20"
+   ::sm/params schema:get-file-tokens
+   ::sm/result [:maybe [:map-of :string :any]]}
+  [cfg {:keys [::rpc/profile-id file-id]}]
+  (bfc/check-file-exists cfg file-id)
+  (check-read-permissions! cfg profile-id file-id)
+  (let [{:keys [data]} (bfc/get-file cfg file-id)]
+    (binding [pmap/*load-fn* (partial feat.fdata/load-pointer cfg file-id)]
+      (when-let [tokens-lib (cfo/get-tokens-lib data)]
+        (ctob/export-dtcg-json tokens-lib (cfo/get-tokens-status data))))))
+
+
 ;; --- COMMAND QUERY: get-file-libraries
 
 (def ^:private schema:get-file-libraries
@@ -1095,7 +1143,8 @@
                          :profile-id profile-id})
 
     (rph/with-meta (rph/wrap)
-      {::audit/props {:project-id (:project-id file)
+      {::audit/props {:team-id (:id team)
+                      :project-id (:project-id file)
                       :name (:name file)
                       :created-at (:created-at file)
                       :modified-at (:modified-at file)}})))
