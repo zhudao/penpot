@@ -71,8 +71,9 @@ test.describe("Grid layout", () => {
 
     await workspace.clickLeafLayer("Board");
     const section = page.getByTestId("inspect-layout");
-    await expect(section.getByRole("button", { name: "Edit grid" }))
-      .toBeVisible();
+    await expect(
+      section.getByRole("button", { name: "Edit grid" }),
+    ).toBeVisible();
     // The buttons are a small part of the section: compare every pixel.
     await expect(section).toHaveScreenshot("grid-layout-options.png", {
       maxDiffPixelRatio: 0,
@@ -187,8 +188,9 @@ test.describe("Design tab", () => {
     await padding.click();
     await padding.blur();
     await page.mouse.move(0, 0);
-    await expect(section.getByRole("textbox", { name: /top padding/i }))
-      .toBeVisible();
+    await expect(
+      section.getByRole("textbox", { name: /top padding/i }),
+    ).toBeVisible();
     await expect(section).toHaveScreenshot("flex-layout-pressed.png", {
       maxDiffPixelRatio: 0,
       threshold: 0,
@@ -255,12 +257,79 @@ test.describe("Design tab", () => {
     await marginMode.click();
     await marginMode.blur();
     await page.mouse.move(0, 0);
-    await expect(section.getByRole("textbox", { name: "Top margin" }))
-      .toBeVisible();
+    await expect(
+      section.getByRole("textbox", { name: "Top margin" }),
+    ).toBeVisible();
     await expect(section).toHaveScreenshot("margin-multiple.png", {
       maxDiffPixelRatio: 0,
       threshold: 0,
     });
+  });
+});
+
+test.describe("Component options", () => {
+  test("Shows the component pill of a copy", async ({ page }) => {
+    const workspace = new WorkspacePage(page);
+    await workspace.setupEmptyFile();
+    await workspace.mockRPC(/get\-file\?/, "workspace/get-file-9066.json");
+    await workspace.goToWorkspace({
+      fileId: "e179d9df-de35-80bf-8005-283bbd5516b0",
+      pageId: "e179d9df-de35-80bf-8005-283bbd5516b1",
+    });
+
+    await workspace.clickToggableLayer("Board");
+    await workspace.clickToggableLayer("Group");
+    await workspace.layers.getByText("A", { exact: true }).click();
+
+    await expect(
+      workspace.rightSidebar.getByTestId("component-pill-button"),
+    ).toBeVisible();
+    // The component pill is a small part of the sidebar: compare every
+    // pixel.
+    await expect(workspace.rightSidebar).toHaveScreenshot({
+      maxDiffPixelRatio: 0,
+      threshold: 0,
+    });
+  });
+
+  test("Shows the annotation actions of a main component", async ({ page }) => {
+    const workspace = new WorkspacePage(page);
+    await workspace.setupEmptyFile();
+    await workspace.mockRPC(/get\-file\?/, "workspace/get-file-9066.json");
+    await workspace.goToWorkspace({
+      fileId: "e179d9df-de35-80bf-8005-283bbd5516b0",
+      pageId: "e179d9df-de35-80bf-8005-283bbd5516b1",
+    });
+
+    await workspace.clickToggableLayer("Board");
+    await workspace.clickToggableLayer("Group");
+    await workspace.layers.getByText("B", { exact: true }).click();
+    await workspace.rightSidebar
+      .getByRole("button", { name: "Options" })
+      .click();
+    await workspace.rightSidebar.getByText("Create annotation").click();
+
+    // Creating: save (disabled while the text is empty) and discard.
+    const annotation = workspace.rightSidebar.locator("#annotation-textarea");
+    await expect(annotation).toBeFocused();
+    await expect(workspace.rightSidebar).toHaveScreenshot(
+      "annotation-creating.png",
+      { maxDiffPixelRatio: 0, threshold: 0 },
+    );
+
+    // Saved: edit and delete show when hovering the title.
+    await annotation.fill("An annotation");
+    await workspace.rightSidebar
+      .getByRole("button", { name: "Create", exact: true })
+      .click();
+    const title = workspace.rightSidebar.getByText("Annotation", {
+      exact: true,
+    });
+    await title.hover();
+    await expect(workspace.rightSidebar).toHaveScreenshot(
+      "annotation-saved.png",
+      { maxDiffPixelRatio: 0, threshold: 0 },
+    );
   });
 });
 
@@ -317,6 +386,36 @@ test.describe("Assets tab", () => {
     await workspace.sidebar.getByTitle("List view").click();
 
     await expect(workspace.page).toHaveScreenshot();
+  });
+});
+
+test.describe("Guides", () => {
+  test("Shows the advanced options of a square guide", async ({ page }) => {
+    // A taller window keeps the whole Design tab visible: a scrolled
+    // sidebar can land on a fractional offset and change the antialiasing.
+    await page.setViewportSize({ width: 1280, height: 900 });
+    const workspace = new WorkspacePage(page);
+    await workspace.setupEmptyFile();
+    await workspace.goToWorkspace();
+
+    await workspace.boardButton.click();
+    await workspace.clickWithDragViewportAt(128, 128, 200, 200);
+    await workspace.rightSidebar
+      .getByRole("button", { name: "Add guide" })
+      .click();
+
+    // The advanced options toggle has no accessible name yet.
+    await workspace.rightSidebar
+      .locator("button[class*='frame_grid__show-options']")
+      .click();
+    await expect(workspace.rightSidebar.getByText("Color")).toBeVisible();
+    // The guide options are a small part of the sidebar: compare every
+    // pixel. The color rows antialias their rounded corners one color step
+    // differently between runs, so allow that much and nothing more.
+    await expect(workspace.rightSidebar).toHaveScreenshot({
+      maxDiffPixelRatio: 0,
+      threshold: 0.02,
+    });
   });
 });
 
