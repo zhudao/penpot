@@ -1558,6 +1558,10 @@ msgstr "The email «%s» has been reported as spam or permanently bounce."
 msgid "errors.export-failed"
 msgstr "The export failed. Try again in a moment."
 
+#: src/app/main/data/exports/assets.cljs:346
+msgid "errors.export-too-large"
+msgstr "Too large to export, try a smaller scale"
+
 #: src/app/main/errors.cljs:974
 msgid "errors.feature-mismatch"
 msgstr ""
@@ -9350,6 +9354,10 @@ msgstr "Move (%s)"
 msgid "workspace.toolbar.palette-bar"
 msgstr "Palette bar"
 
+#: src/app/main/ui/workspace/palette.cljs:211
+msgid "workspace.toolbar.palette-options"
+msgstr "Palette options"
+
 #: src/app/main/ui/workspace/top_toolbar.cljs:72
 msgid "workspace.toolbar.path"
 msgstr "Path (%s)"
@@ -9398,6 +9406,10 @@ msgstr "There are no history changes so far"
 #: src/app/main/ui/workspace/sidebar/history.cljs:364
 msgid "workspace.undo.entry.by"
 msgstr "by %s"
+
+#: src/app/main/ui/workspace/sidebar/history.cljs
+msgid "workspace.undo.entry.show-details"
+msgstr "Show details"
 
 #: src/app/main/ui/workspace/sidebar/history.cljs:154
 msgid "workspace.undo.entry.delete"

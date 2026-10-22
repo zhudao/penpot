@@ -1574,6 +1574,10 @@ msgstr "El email «%s» tiene reportes de spam o de rebote permanente."
 msgid "errors.export-failed"
 msgstr "La exportación ha fallado. Inténtalo de nuevo en un momento."
 
+#: src/app/main/data/exports/assets.cljs:346
+msgid "errors.export-too-large"
+msgstr "El archivo es demasiado grande, prueba con otra escala"
+
 #: src/app/main/errors.cljs:974
 msgid "errors.feature-mismatch"
 msgstr ""
@@ -9456,6 +9460,10 @@ msgstr "Mover (%s)"
 msgid "workspace.toolbar.palette-bar"
 msgstr "Barra de paletas"
 
+#: src/app/main/ui/workspace/palette.cljs:211
+msgid "workspace.toolbar.palette-options"
+msgstr "Opciones de la paleta"
+
 #: src/app/main/ui/workspace/top_toolbar.cljs:72
 msgid "workspace.toolbar.path"
 msgstr "Ruta (%s)"
@@ -9504,6 +9512,10 @@ msgstr "Todavía no hay cambios en el histórico"
 #: src/app/main/ui/workspace/sidebar/history.cljs:364
 msgid "workspace.undo.entry.by"
 msgstr "por %s"
+
+#: src/app/main/ui/workspace/sidebar/history.cljs
+msgid "workspace.undo.entry.show-details"
+msgstr "Mostrar detalles"
 
 #: src/app/main/ui/workspace/sidebar/history.cljs:154
 msgid "workspace.undo.entry.delete"
