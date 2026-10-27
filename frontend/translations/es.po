@@ -2317,6 +2317,10 @@ msgstr "Propiedades de la variante"
 msgid "inspect.attributes.variants"
 msgstr "Propiedades de las variantes"
 
+#: src/app/main/ui/inspect/code.cljs:315, src/app/main/ui/inspect/code.cljs:358
+msgid "inspect.code.expand-panel"
+msgstr "Expandir panel"
+
 #: src/app/main/ui/inspect/right_sidebar.cljs:169
 msgid "inspect.color-space-label"
 msgstr "Seleccionar espacio de color"
@@ -2985,6 +2989,10 @@ msgstr "Error"
 #: src/app/main/data/workspace/versions.cljs:314
 msgid "labels.exit"
 msgstr "Salir"
+
+#: src/app/main/ui/viewer/thumbnails.cljs:96
+msgid "labels.expand"
+msgstr "Expandir"
 
 #: src/app/main/ui/dashboard/team.cljs:782
 msgid "labels.expired-invitation"
@@ -6168,6 +6176,10 @@ msgstr "No se ha encontrado ningún tablero."
 msgid "viewer.frame-not-found"
 msgstr "No se encuentra el tablero."
 
+#: src/app/main/ui/viewer.cljs:127
+msgid "viewer.go-to-first-board"
+msgstr "Ir al primer tablero"
+
 #: src/app/main/ui/viewer/header.cljs:341
 msgid "viewer.header.comments-section"
 msgstr "Comentarios (%s)"
@@ -6207,6 +6219,14 @@ msgstr "Mostrar interacciones al hacer click"
 #: src/app/main/ui/viewer/header.cljs:236
 msgid "viewer.header.sitemap"
 msgstr "Mapa del sitio"
+
+#: src/app/main/ui/viewer/thumbnails.cljs:70
+msgid "viewer.thumbnails.scroll-left"
+msgstr "Desplazar a la izquierda"
+
+#: src/app/main/ui/viewer/thumbnails.cljs:76
+msgid "viewer.thumbnails.scroll-right"
+msgstr "Desplazar a la derecha"
 
 #: src/app/main/ui/workspace/webgl_unavailable_modal.cljs:76
 msgid "webgl.modals.webgl-unavailable.cta-dashboard"
@@ -6831,6 +6851,14 @@ msgstr "Pantalla completa"
 msgid "workspace.header.zoom-selected"
 msgstr "Zoom a selección"
 
+#: src/app/main/ui/workspace/sidebar/options/menus/layout_container.cljs
+msgid "workspace.layout-grid.editor.columns"
+msgstr "Columnas"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/layout_container.cljs
+msgid "workspace.layout-grid.editor.rows"
+msgstr "Filas"
+
 #: src/app/main/ui/workspace/sidebar/options/menus/grid_cell.cljs:294, src/app/main/ui/workspace/sidebar/options/menus/grid_cell.cljs:296, src/app/main/ui/workspace/sidebar/options/menus/layout_container.cljs:854
 msgid "workspace.layout-grid.editor.options.edit-grid"
 msgstr "Editar grid"
@@ -6866,6 +6894,18 @@ msgstr "Padding superior"
 #: src/app/main/ui/workspace/sidebar/options/menus/layout_container.cljs:383, src/app/main/ui/workspace/sidebar/options/menus/layout_container.cljs:394, src/app/main/ui/workspace/sidebar/options/menus/layout_container.cljs:400
 msgid "workspace.layout-grid.editor.padding.vertical"
 msgstr "Padding vertical"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/layout_container.cljs
+msgid "workspace.layout-grid.editor.select-column"
+msgstr "Seleccionar columna"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/layout_container.cljs
+msgid "workspace.layout-grid.editor.select-row"
+msgstr "Seleccionar fila"
+
+#: src/app/main/ui/workspace/viewport/grid_layout_editor.cljs
+msgid "workspace.layout-grid.editor.track-options"
+msgstr "Opciones de la pista"
 
 #: src/app/main/ui/workspace/viewport/grid_layout_editor.cljs:61
 msgid "workspace.layout-grid.editor.title"

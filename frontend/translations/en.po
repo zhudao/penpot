@@ -2281,6 +2281,10 @@ msgstr "Variant properties"
 msgid "inspect.attributes.variants"
 msgstr "Variants properties"
 
+#: src/app/main/ui/inspect/code.cljs:315, src/app/main/ui/inspect/code.cljs:358
+msgid "inspect.code.expand-panel"
+msgstr "Expand panel"
+
 #: src/app/main/ui/inspect/right_sidebar.cljs:169
 msgid "inspect.color-space-label"
 msgstr "Select color space"
@@ -2947,6 +2951,10 @@ msgstr "Error"
 #: src/app/main/data/workspace/versions.cljs:314
 msgid "labels.exit"
 msgstr "Exit"
+
+#: src/app/main/ui/viewer/thumbnails.cljs:96
+msgid "labels.expand"
+msgstr "Expand"
 
 #: src/app/main/ui/dashboard/team.cljs:782
 msgid "labels.expired-invitation"
@@ -6087,6 +6095,10 @@ msgstr "No boards found on the page."
 msgid "viewer.frame-not-found"
 msgstr "Board not found."
 
+#: src/app/main/ui/viewer.cljs:127
+msgid "viewer.go-to-first-board"
+msgstr "Go to the first board"
+
 #: src/app/main/ui/viewer/header.cljs:341
 msgid "viewer.header.comments-section"
 msgstr "Comments (%s)"
@@ -6126,6 +6138,14 @@ msgstr "Show interactions on click"
 #: src/app/main/ui/viewer/header.cljs:236
 msgid "viewer.header.sitemap"
 msgstr "Sitemap"
+
+#: src/app/main/ui/viewer/thumbnails.cljs:70
+msgid "viewer.thumbnails.scroll-left"
+msgstr "Scroll left"
+
+#: src/app/main/ui/viewer/thumbnails.cljs:76
+msgid "viewer.thumbnails.scroll-right"
+msgstr "Scroll right"
 
 #: src/app/main/ui/workspace/webgl_unavailable_modal.cljs:76
 msgid "webgl.modals.webgl-unavailable.cta-dashboard"
@@ -6747,6 +6767,14 @@ msgstr "Full screen"
 msgid "workspace.header.zoom-selected"
 msgstr "Zoom to selected"
 
+#: src/app/main/ui/workspace/sidebar/options/menus/layout_container.cljs
+msgid "workspace.layout-grid.editor.columns"
+msgstr "Columns"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/layout_container.cljs
+msgid "workspace.layout-grid.editor.rows"
+msgstr "Rows"
+
 #: src/app/main/ui/workspace/sidebar/options/menus/grid_cell.cljs:294, src/app/main/ui/workspace/sidebar/options/menus/grid_cell.cljs:296, src/app/main/ui/workspace/sidebar/options/menus/layout_container.cljs:854
 msgid "workspace.layout-grid.editor.options.edit-grid"
 msgstr "Edit grid"
@@ -6782,6 +6810,18 @@ msgstr "Top padding"
 #: src/app/main/ui/workspace/sidebar/options/menus/layout_container.cljs:383, src/app/main/ui/workspace/sidebar/options/menus/layout_container.cljs:394, src/app/main/ui/workspace/sidebar/options/menus/layout_container.cljs:400
 msgid "workspace.layout-grid.editor.padding.vertical"
 msgstr "Vertical padding"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/layout_container.cljs
+msgid "workspace.layout-grid.editor.select-column"
+msgstr "Select column"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/layout_container.cljs
+msgid "workspace.layout-grid.editor.select-row"
+msgstr "Select row"
+
+#: src/app/main/ui/workspace/viewport/grid_layout_editor.cljs
+msgid "workspace.layout-grid.editor.track-options"
+msgstr "Track options"
 
 #: src/app/main/ui/workspace/viewport/grid_layout_editor.cljs:61
 msgid "workspace.layout-grid.editor.title"
